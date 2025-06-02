@@ -1,1 +1,33 @@
-vendor/
+# Composer
+/vendor/
+composer.lock
+
+# PHP
+.phpunit.result.cache
+.phpunit.cache
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+error_log
+
+# Cache
+*.cache
+.cache/
+
+data/
