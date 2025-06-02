@@ -312,6 +312,7 @@ A web interface is available for managing CSV files. To use it:
    - Edit records
    - Delete files and records
    - Search records
+4. Double click on the row to open the edit row dialog
 
 ## Testing
 

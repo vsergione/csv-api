@@ -54,21 +54,17 @@
                 border-bottom: 1px solid #dee2e6;
             }
         }
-        .auth-form {
-            transition: all 0.3s ease;
-            overflow: hidden;
-        }
-        .auth-form.collapsed {
-            max-height: 0;
-            margin: 0;
-            padding: 0;
-            opacity: 0;
-        }
-        .auth-toggle {
-            cursor: pointer;
-            color: #0d6efd;
-            text-decoration: underline;
+        .search-form {
             margin-bottom: 1rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 0.25rem;
+        }
+        .search-form .form-group {
+            margin-bottom: 0.5rem;
+        }
+        .search-form .form-check {
+            margin-top: 0.5rem;
         }
     </style>
 </head>
@@ -76,19 +72,16 @@
     <div class="sidebar">
         <h4 class="mb-4">CSV File Manager</h4>
         
-        <div class="auth-toggle" onclick="toggleAuthForm()">Login</div>
-        <div class="auth-form">
-            <div class="auth-form-content my-4">
+        <div class="auth-form mb-4">
             <div class="mb-3">
                 <label for="username" class="form-label">Username</label>
                 <input type="text" class="form-control" id="username" placeholder="Username">
             </div>
             <div class="mb-3">
                 <label for="password" class="form-label">Password</label>
-                <input type="password" class="form-control" id="password" placeholder="Password">
+                <input type="password" class="form-control" id="password" placeholder="Password" value="secret123">
             </div>
             <button class="btn btn-primary w-100" onclick="authenticate()">Login</button>
-        </div>
         </div>
 
         <div id="mainContent" class="hidden">
@@ -168,8 +161,6 @@
                 },
                 success: function() {
                     document.getElementById('mainContent').classList.remove('hidden');
-                    document.querySelector('.auth-form').classList.add('collapsed');
-                    document.querySelector('.auth-toggle').textContent = 'Logout';
                     listFiles();
                 },
                 error: function(xhr) {
@@ -180,23 +171,6 @@
                     }
                 }
             });
-        }
-
-        function toggleAuthForm() {
-            const authForm = document.querySelector('.auth-form');
-            const authToggle = document.querySelector('.auth-toggle');
-            
-            if (authForm.classList.contains('collapsed')) {
-                // If logged in, log out
-                document.getElementById('mainContent').classList.add('hidden');
-                document.getElementById('fileContent').innerHTML = '';
-                currentFile = null;
-                authToggle.textContent = 'Login';
-                authForm.classList.remove('collapsed');
-            } else {
-                // If not logged in, show login form
-                authForm.classList.remove('collapsed');
-            }
         }
 
         function listFiles() {
@@ -265,6 +239,9 @@
 
         function loadFileContent(offset = 0) {
             currentPage = offset;
+            //document.getElementById('searchValue').value = '';
+            //document.getElementById('exactMatch').checked = false;
+            
             $.ajax({
                 url: `${API_URL}/api/csv/${currentFile}`,
                 type: 'GET',
@@ -299,12 +276,44 @@
                     <h4>${currentFile}</h4>
                     <button class="btn btn-primary" onclick="showNewRecordModal()">New Record</button>
                 </div>
+                <div class="search-form">
+                    <form id="searchForm" onsubmit="handleSearch(event)">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="form-group">
+                                    <label class="form-label">Search Field</label>
+                                    <select class="form-select" id="searchField">
+                                        ${headers.map(header => `<option value="${header}">${header}</option>`).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label class="form-label">Search Value</label>
+                                    <input type="text" class="form-control" id="searchValue" placeholder="Enter search value">
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-group">
+                                    <label class="form-label">&nbsp;</label>
+                                    <button type="submit" class="btn btn-primary w-100">Search</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="exactMatch">
+                            <label class="form-check-label" for="exactMatch">
+                                Exact match
+                            </label>
+                        </div>
+                    </form>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-striped table-hover">
                         <thead>
                             <tr>
                                 ${headers.map(header => `<th>${header}</th>`).join('')}
-                                <th style="width: 100px;"   >Actions</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -555,6 +564,38 @@
                 },
                 error: function(xhr) {
                     alert('Error deleting file: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                }
+            });
+        }
+
+        function handleSearch(event) {
+            event.preventDefault();
+            const searchField = document.getElementById('searchField').value;
+            const searchValue = document.getElementById('searchValue').value;
+            const exactMatch = document.getElementById('exactMatch').checked;
+
+            if (!searchValue) {
+                loadFileContent(0);
+                return;
+            }
+
+            $.ajax({
+                url: `${API_URL}/api/csv/${currentFile}/search`,
+                type: 'GET',
+                headers: {
+                    'Authorization': getAuthHeader()
+                },
+                data: {
+                    [searchField]: searchValue,
+                    exact: exactMatch,
+                    'page[offset]': 0,
+                    'page[limit]': pageSize
+                },
+                success: function(response) {
+                    displayFileContent(response);
+                },
+                error: function(xhr) {
+                    alert('Error searching records: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
                 }
             });
         }

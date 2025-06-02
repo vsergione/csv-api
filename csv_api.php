@@ -4,6 +4,7 @@
 define('AUTH_USERNAME', 'admin');
 define('AUTH_PASSWORD', 'secret123');
 define('DATA_DIR', __DIR__ . '/data');
+
 // Basic Auth Function
 function checkAuth() {
     if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
@@ -277,9 +278,6 @@ error_log("parts: ". $_SERVER['REQUEST_METHOD']." ".$requestUri." ".print_r($par
 
 // Create data directory if it doesn't exist
 
-if (!file_exists(DATA_DIR)) {
-    mkdir(DATA_DIR, 0777, true);
-}
 // Validate path structure for other endpoints
 if (count($parts) < 2 || $parts[0] !== 'api' || $parts[1] !== 'csv') {
     http_response_code(404);
