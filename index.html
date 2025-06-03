@@ -373,25 +373,36 @@
             const total = response.meta.total;
             const totalPages = Math.ceil(total / pageSize);
             let pagination = `
-                <nav aria-label="Page navigation">
-                    <ul class="pagination justify-content-center">
-                        <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
-                            <a class="page-link" href="#" onclick="loadFileContent(0)">First</a>
-                        </li>
-                        <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
-                            <a class="page-link" href="#" onclick="loadFileContent(${currentPage - pageSize})">Previous</a>
-                        </li>
-                        <li class="page-item disabled">
-                            <span class="page-link">Page ${Math.floor(currentPage / pageSize) + 1} of ${totalPages}</span>
-                        </li>
-                        <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
-                            <a class="page-link" href="#" onclick="loadFileContent(${currentPage + pageSize})">Next</a>
-                        </li>
-                        <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
-                            <a class="page-link" href="#" onclick="loadFileContent(${(totalPages - 1) * pageSize})">Last</a>
-                        </li>
-                    </ul>
-                </nav>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="d-flex align-items-center">
+                        <label class="me-2">Page size:</label>
+                        <select class="form-select form-select-sm" style="width: auto;" onchange="changePageSize(this.value)">
+                            <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
+                            <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
+                            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+                            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+                        </select>
+                    </div>
+                    <nav aria-label="Page navigation">
+                        <ul class="pagination mb-0">
+                            <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
+                                <a class="page-link" href="#" onclick="loadFileContent(0)">First</a>
+                            </li>
+                            <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
+                                <a class="page-link" href="#" onclick="loadFileContent(${currentPage - pageSize})">Previous</a>
+                            </li>
+                            <li class="page-item disabled">
+                                <span class="page-link">Page ${Math.floor(currentPage / pageSize) + 1} of ${totalPages}</span>
+                            </li>
+                            <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
+                                <a class="page-link" href="#" onclick="loadFileContent(${currentPage + pageSize})">Next</a>
+                            </li>
+                            <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
+                                <a class="page-link" href="#" onclick="loadFileContent(${(totalPages - 1) * pageSize})">Last</a>
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
             `;
 
             content.html(table + pagination);
@@ -645,6 +656,12 @@
             } catch (error) {
                 alert(error.message);
             }
+        }
+
+        function changePageSize(newSize) {
+            pageSize = parseInt(newSize);
+            currentPage = 0; // Reset to first page when changing page size
+            loadFileContent(0);
         }
     </script>
 </body>
