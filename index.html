@@ -138,15 +138,40 @@
         let pageSize = 10;
         let authToken = null;
 
+        // Input sanitization functions
+        function sanitizeInput(input) {
+            if (typeof input !== 'string') return input;
+            // Remove HTML tags and encode special characters
+            return input.replace(/[<>]/g, '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;')
+                    .trim();
+        }
+
+        function sanitizeFilename(filename) {
+            // Remove any characters that could be used for path traversal
+            return filename.replace(/[^a-zA-Z0-9._-]/g, '');
+        }
+
+        function validateSearchInput(value) {
+            // Prevent SQL injection patterns
+            const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|--)\b)/i;
+            if (sqlPatterns.test(value)) {
+                throw new Error('Invalid search value');
+            }
+            return true;
+        }
+
         function getAuthHeader() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            const username = sanitizeInput(document.getElementById('username').value);
+            const password = sanitizeInput(document.getElementById('password').value);
             return 'Basic ' + btoa(username + ':' + password);
         }
 
         function authenticate() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
+            const username = sanitizeInput(document.getElementById('username').value);
+            const password = sanitizeInput(document.getElementById('password').value);
 
             if (!username || !password) {
                 alert('Please enter both username and password');
@@ -161,6 +186,8 @@
                 },
                 success: function() {
                     document.getElementById('mainContent').classList.remove('hidden');
+                    document.querySelector('.auth-form').classList.add('collapsed');
+                    //document.querySelector('.auth-toggle').textContent = 'Logout';
                     listFiles();
                 },
                 error: function(xhr) {
@@ -200,6 +227,12 @@
             const file = fileInput.files[0];
             if (!file) {
                 alert('Please select a file');
+                return;
+            }
+
+            // Validate file type
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                alert('Only CSV files are allowed');
                 return;
             }
 
@@ -452,76 +485,84 @@
         }
 
         function saveRecord(id) {
-            const attributes = {};
-            const form = document.getElementById('editForm');
-            form.querySelectorAll('input[type="text"]').forEach(input => {
-                const key = input.id.replace('edit_', '');
-                attributes[key] = input.value;
-            });
+            try {
+                const attributes = {};
+                const form = document.getElementById('editForm');
+                form.querySelectorAll('input[type="text"]').forEach(input => {
+                    const key = input.id.replace('edit_', '');
+                    attributes[key] = sanitizeInput(input.value);
+                });
 
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}/${id}`,
-                type: 'PUT',
-                headers: {
-                    'Authorization': getAuthHeader(),
-                    'Content-Type': 'application/vnd.api+json'
-                },
-                data: JSON.stringify({
-                    data: {
-                        type: currentFile.replace('.csv', ''),
-                        id: id,
-                        attributes: attributes
+                $.ajax({
+                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}/${id}`,
+                    type: 'PUT',
+                    headers: {
+                        'Authorization': getAuthHeader(),
+                        'Content-Type': 'application/vnd.api+json'
+                    },
+                    data: JSON.stringify({
+                        data: {
+                            type: currentFile.replace('.csv', ''),
+                            id: id,
+                            attributes: attributes
+                        }
+                    }),
+                    success: function() {
+                        closeModal();
+                        loadFileContent(currentPage);
+                    },
+                    error: function(xhr) {
+                        alert('Error saving record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
                     }
-                }),
-                success: function() {
-                    closeModal();
-                    loadFileContent(currentPage);
-                },
-                error: function(xhr) {
-                    alert('Error saving record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                }
-            });
+                });
+            } catch (error) {
+                alert(error.message);
+            }
         }
 
         function saveNewRecord() {
-            const form = document.getElementById('newRecordForm');
-            const attributes = {};
-            let isValid = true;
+            try {
+                const form = document.getElementById('newRecordForm');
+                const attributes = {};
+                let isValid = true;
 
-            form.querySelectorAll('input[type="text"]').forEach(input => {
-                const key = input.id.replace('new_', '');
-                attributes[key] = input.value;
-                if (!input.value) {
-                    isValid = false;
-                }
-            });
-
-            if (!isValid) {
-                alert('Please fill in all fields');
-                return;
-            }
-
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}`,
-                type: 'POST',
-                headers: {
-                    'Authorization': getAuthHeader(),
-                    'Content-Type': 'application/vnd.api+json'
-                },
-                data: JSON.stringify({
-                    data: {
-                        type: currentFile.replace('.csv', ''),
-                        attributes: attributes
+                form.querySelectorAll('input[type="text"]').forEach(input => {
+                    const key = input.id.replace('new_', '');
+                    attributes[key] = sanitizeInput(input.value);
+                    if (!input.value) {
+                        isValid = false;
                     }
-                }),
-                success: function() {
-                    closeNewRecordModal();
-                    loadFileContent(currentPage);
-                },
-                error: function(xhr) {
-                    alert('Error creating record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                });
+
+                if (!isValid) {
+                    alert('Please fill in all fields');
+                    return;
                 }
-            });
+
+                $.ajax({
+                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}`,
+                    type: 'POST',
+                    headers: {
+                        'Authorization': getAuthHeader(),
+                        'Content-Type': 'application/vnd.api+json'
+                    },
+                    data: JSON.stringify({
+                        data: {
+                            type: currentFile.replace('.csv', ''),
+                            attributes: attributes
+                        }
+                    }),
+                    success: function() {
+                        closeNewRecordModal();
+                        loadFileContent(currentPage);
+                    },
+                    error: function(xhr) {
+                        alert('Error creating record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                    }
+                });
+            } catch (error) {
+                alert(error.message);
+            }
         }
 
         function deleteRecord(id) {
@@ -550,7 +591,7 @@
             }
 
             $.ajax({
-                url: `${API_URL}/api/csv/${filename}`,
+                url: `${API_URL}/api/csv/${sanitizeFilename(filename)}`,
                 type: 'DELETE',
                 headers: {
                     'Authorization': getAuthHeader()
@@ -570,34 +611,40 @@
 
         function handleSearch(event) {
             event.preventDefault();
-            const searchField = document.getElementById('searchField').value;
-            const searchValue = document.getElementById('searchValue').value;
-            const exactMatch = document.getElementById('exactMatch').checked;
+            try {
+                const searchField = sanitizeInput(document.getElementById('searchField').value);
+                const searchValue = sanitizeInput(document.getElementById('searchValue').value);
+                const exactMatch = document.getElementById('exactMatch').checked;
 
-            if (!searchValue) {
-                loadFileContent(0);
-                return;
-            }
+                validateSearchInput(searchValue);
 
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}/search`,
-                type: 'GET',
-                headers: {
-                    'Authorization': getAuthHeader()
-                },
-                data: {
-                    [searchField]: searchValue,
-                    exact: exactMatch,
-                    'page[offset]': 0,
-                    'page[limit]': pageSize
-                },
-                success: function(response) {
-                    displayFileContent(response);
-                },
-                error: function(xhr) {
-                    alert('Error searching records: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                if (!searchValue) {
+                    loadFileContent(0);
+                    return;
                 }
-            });
+
+                $.ajax({
+                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}/search`,
+                    type: 'GET',
+                    headers: {
+                        'Authorization': getAuthHeader()
+                    },
+                    data: {
+                        [searchField]: searchValue,
+                        exact: exactMatch,
+                        'page[offset]': currentPage,
+                        'page[limit]': pageSize
+                    },
+                    success: function(response) {
+                        displayFileContent(response);
+                    },
+                    error: function(xhr) {
+                        alert('Error searching records: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                    }
+                });
+            } catch (error) {
+                alert(error.message);
+            }
         }
     </script>
 </body>

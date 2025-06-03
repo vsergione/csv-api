@@ -1,16 +1,57 @@
 <?php
 
 // Basic Auth Configuration
-define('AUTH_USERNAME', 'admin');
-define('AUTH_PASSWORD', 'secret123');
-define('DATA_DIR', __DIR__ . '/data');
+define('AUTH_USERNAME', 'admin');   // TODO: change to your username
+define('AUTH_PASSWORD', 'secret123');   // TODO: change to your password
+define('DATA_DIR', __DIR__ . '/data');   // TODO: change to your data directory
+
+// Input sanitization functions
+function sanitizeInput($input) {
+    if (is_array($input)) {
+        return array_map('sanitizeInput', $input);
+    }
+    if (!is_string($input)) {
+        return $input;
+    }
+    // Remove HTML tags and encode special characters
+    return htmlspecialchars(strip_tags($input), ENT_QUOTES, 'UTF-8');
+}
+
+function sanitizeFilename($filename) {
+    // Remove any characters that could be used for path traversal
+    $filename = preg_replace('/[^a-zA-Z0-9._-]/', '', $filename);
+    // Ensure the file has a .csv extension
+    if (!preg_match('/\.csv$/', $filename)) {
+        throw new InvalidArgumentException('Invalid file extension');
+    }
+    return $filename;
+}
+
+function validateSearchInput($value) {
+    // Prevent SQL injection patterns
+    $sqlPatterns = '/\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|--)\b/i';
+    if (preg_match($sqlPatterns, $value)) {
+        throw new InvalidArgumentException('Invalid search value');
+    }
+    return true;
+}
+
+// Handle CORS
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Content-Type: application/vnd.api+json');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
 
 // Basic Auth Function
 function checkAuth() {
     if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
         header('WWW-Authenticate: Basic realm="CSV API"');
         header('HTTP/1.0 401 Unauthorized');
-        echo json_encode([
+        die(json_encode([
             'errors' => [
                 [
                     'status' => '401',
@@ -18,13 +59,13 @@ function checkAuth() {
                     'detail' => 'Authentication required'
                 ]
             ]
-        ]);
+        ]));
         exit;
     }
 
     if ($_SERVER['PHP_AUTH_USER'] !== AUTH_USERNAME || $_SERVER['PHP_AUTH_PW'] !== AUTH_PASSWORD) {
         header('HTTP/1.0 401 Unauthorized');
-        echo json_encode([
+        die(json_encode ([
             'errors' => [
                 [
                     'status' => '401',
@@ -32,7 +73,7 @@ function checkAuth() {
                     'detail' => 'Invalid credentials'
                 ]
             ]
-        ]);
+        ]));
         exit;
     }
 }
@@ -68,7 +109,7 @@ class CsvHandler {
             fclose($file);
             throw new RuntimeException("Invalid CSV file: No headers found");
         }
-        $this->headers = $csvFile;
+        $this->headers = array_map('sanitizeInput', $csvFile);
         if ($this->headers === false) {
             fclose($file);
             throw new RuntimeException("Invalid CSV file: No headers found");
@@ -78,7 +119,7 @@ class CsvHandler {
         $this->data = [];
         while (($row = fgetcsv($file)) !== false) {
             if (count($row) === count($this->headers)) {
-                $this->data[] = array_combine($this->headers, $row);
+                $this->data[] = array_combine($this->headers, array_map('sanitizeInput', $row));
             }
         }
 
@@ -141,11 +182,17 @@ class CsvHandler {
     }
 
     public function search(array $criteria, bool $exactMatch = false, int $offset = 0, int $perPage = 10): array {
-        $results = [];
+        // Sanitize search criteria
+        $criteria = sanitizeInput($criteria);
         
+        // Validate search inputs
+        foreach ($criteria as $value) {
+            validateSearchInput($value);
+        }
+
+        $results = [];
         foreach ($this->data as $index => $row) {
             $match = true;
-            
             foreach ($criteria as $column => $value) {
                 if (!isset($row[$column])) {
                     $match = false;
@@ -186,6 +233,9 @@ class CsvHandler {
     }
 
     public function create(array $attributes): int {
+        // Sanitize input attributes
+        $attributes = sanitizeInput($attributes);
+
         // Validate that all required headers are present
         foreach ($this->headers as $header) {
             if (!isset($attributes[$header])) {
@@ -203,6 +253,9 @@ class CsvHandler {
         if (!isset($this->data[$id])) {
             return false;
         }
+
+        // Sanitize input attributes
+        $attributes = sanitizeInput($attributes);
 
         // Validate that all required headers are present
         foreach ($this->headers as $header) {
@@ -239,49 +292,20 @@ class CsvHandler {
     }
 }
 
-// Handle CORS
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-header('Content-Type: application/vnd.api+json');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
-
-// Get the request path
-$requestUri = $_SERVER['REQUEST_URI'];
+// Get the request path and sanitize it
+$requestUri = filter_var($_SERVER['REQUEST_URI'], FILTER_SANITIZE_URL);
 $path = parse_url($requestUri, PHP_URL_PATH);
 $query = parse_url($requestUri, PHP_URL_QUERY);
 
-// Remove leading slash and split path
-$path = ltrim($path, '/');
-$parts = explode('/', $path);
-// Check if the first part is csv_api.php
-if ($parts[0] !== 'csv_api.php') {
-    http_response_code(404);
-    echo json_encode([
-        'errors' => [
-            [
-                'status' => '404',
-                'title' => 'Not Found',
-                'detail' => 'The requested resource was not found'
-            ]
-        ]
-    ]);
-    exit;
-}
-
-// Remove csv_api.php from the parts array
-array_shift($parts);
-error_log("parts: ". $_SERVER['REQUEST_METHOD']." ".$requestUri." ".print_r($parts,true));
-
-// Create data directory if it doesn't exist
+// Extract the parts of the path
+$parts =explode("/",explode(basename(__FILE__)."/", $path)[1]);
+error_log("parts: ".print_r($parts,true));
 
 // Validate path structure for other endpoints
 if (count($parts) < 2 || $parts[0] !== 'api' || $parts[1] !== 'csv') {
     http_response_code(404);
-    echo json_encode([
+    die(json_encode ([
         'errors' => [
             [
                 'status' => '404',
@@ -289,96 +313,115 @@ if (count($parts) < 2 || $parts[0] !== 'api' || $parts[1] !== 'csv') {
                 'detail' => 'The requested resource was not found'
             ]
         ]
-    ]);
+    ]));
     exit;
 }
 
-// Handle list files endpoint
-if (count($parts) === 2 && $parts[0] === 'api' && $parts[1] === 'csv') {
-    error_log("list files");
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $files = glob(DATA_DIR . '/*.csv');
-        $fileList = [];
-        foreach ($files as $file) {
-            $fileList[] = [
-                'type' => 'csv_file',
-                'id' => basename($file),
-                'attributes' => [
-                    'filename' => basename($file),
-                    'size' => filesize($file),
-                    'last_modified' => date('c', filemtime($file))
-                ]
-            ];
-        }
-        echo json_encode([
-            'data' => $fileList,
-            'meta' => [
-                'total' => count($fileList)
-            ]
-        ]);
-        exit;
-    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        // Handle file upload
-        if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-            http_response_code(400);
-            echo json_encode([
-                'errors' => [
-                    [
-                        'status' => '400',
-                        'title' => 'Bad Request',
-                        'detail' => 'No file uploaded or upload error'
-                    ]
-                ]
-            ]);
-            exit;
-        }
-
-        $file = $_FILES['file'];
-        $filename = basename($file['name']);
-        
-        // Validate file extension
-        if (pathinfo($filename, PATHINFO_EXTENSION) !== 'csv') {
-            http_response_code(400);
-            echo json_encode([
-                'errors' => [
-                    [
-                        'status' => '400',
-                        'title' => 'Bad Request',
-                        'detail' => 'Only CSV files are allowed'
-                    ]
-                ]
-            ]);
-            exit;
-        }
-
-        // Move uploaded file to data directory
-        $targetPath = DATA_DIR . '/' . $filename;
-        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-            echo json_encode([
-                'data' => [
+try {
+    // Handle list files endpoint
+    if (count($parts) === 2 && $parts[0] === 'api' && $parts[1] === 'csv') {
+        error_log("list files");
+        if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+            $files = glob(DATA_DIR . '/*.csv');
+            $fileList = [];
+            foreach ($files as $file) {
+                $fileList[] = [
                     'type' => 'csv_file',
-                    'id' => $filename,
+                    'id' => basename($file),
                     'attributes' => [
-                        'filename' => $filename,
-                        'size' => filesize($targetPath),
-                        'last_modified' => date('c', filemtime($targetPath))
+                        'filename' => basename($file),
+                        'size' => filesize($file),
+                        'last_modified' => date('c', filemtime($file))
                     ]
+                ];
+            }
+            die(json_encode([
+                'data' => $fileList,
+                'meta' => [
+                    'total' => count($fileList)
                 ]
-            ]);
-        } else {
-            http_response_code(500);
-            echo json_encode([
-                'errors' => [
-                    [
-                        'status' => '500',
-                        'title' => 'Internal Server Error',
-                        'detail' => 'Failed to save uploaded file'
+            ]));
+            exit;
+        } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            // Handle file upload
+            if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+                http_response_code(400);
+                die(json_encode([
+                    'errors' => [
+                        [
+                            'status' => '400',
+                            'title' => 'Bad Request',
+                            'detail' => 'No file uploaded or upload error'
+                        ]
                     ]
-                ]
-            ]);
+                ]));
+                exit;
+            }
+
+            $file = $_FILES['file'];
+            $filename = sanitizeFilename(basename($file['name']));
+            
+            // Validate file type
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mimeType = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            
+            if ($mimeType !== 'text/csv' && $mimeType !== 'text/plain') {
+                http_response_code(400);
+                die(json_encode([
+                    'errors' => [
+                        [
+                            'status' => '400',
+                            'title' => 'Bad Request',
+                            'detail' => 'Invalid file type. Only CSV files are allowed.'
+                        ]
+                    ]
+                ]));
+                exit;
+            }
+
+            // Move uploaded file to data directory
+            $targetPath = DATA_DIR . '/' . $filename;
+            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                die(json_encode([
+                    'data' => [
+                        'type' => 'csv_file',
+                        'id' => $filename,
+                        'attributes' => [
+                            'filename' => $filename,
+                            'size' => filesize($targetPath),
+                            'last_modified' => date('c', filemtime($targetPath))
+                        ]
+                    ]
+                ]));
+            } else {
+                http_response_code(500);
+                die(json_encode([
+                    'errors' => [
+                        [
+                            'status' => '500',
+                            'title' => 'Internal Server Error',
+                            'detail' => 'Failed to save uploaded file'
+                        ]
+                    ]
+                ]));
+            }
+            exit;
         }
-        exit;
     }
+
+}
+catch (Exception $e) {
+    http_response_code(400);
+    die(json_encode([
+        'errors' => [
+            [
+                'status' => '400',
+                'title' => 'Bad Request',
+                'detail' => $e->getMessage()
+            ]
+        ]
+    ]));
 }
 
 // Handle file deletion
@@ -389,7 +432,7 @@ if (count($parts) === 3 && $parts[0] === 'api' && $parts[1] === 'csv' && $_SERVE
     // Validate file extension
     if (pathinfo($filename, PATHINFO_EXTENSION) !== 'csv') {
         http_response_code(400);
-        echo json_encode([
+        die(json_encode([
             'errors' => [
                 [
                     'status' => '400',
@@ -397,13 +440,13 @@ if (count($parts) === 3 && $parts[0] === 'api' && $parts[1] === 'csv' && $_SERVE
                     'detail' => 'Only CSV files can be deleted'
                 ]
             ]
-        ]);
+        ]));
         exit;
     }
 
     if (!file_exists($filePath)) {
         http_response_code(404);
-        echo json_encode([
+        die(json_encode ([
             'errors' => [
                 [
                     'status' => '404',
@@ -411,7 +454,7 @@ if (count($parts) === 3 && $parts[0] === 'api' && $parts[1] === 'csv' && $_SERVE
                     'detail' => 'The requested file was not found'
                 ]
             ]
-        ]);
+        ]));
         exit;
     }
 
@@ -419,7 +462,7 @@ if (count($parts) === 3 && $parts[0] === 'api' && $parts[1] === 'csv' && $_SERVE
         http_response_code(204);
     } else {
         http_response_code(500);
-        echo json_encode([
+        die(json_encode([
             'errors' => [
                 [
                     'status' => '500',
@@ -427,31 +470,9 @@ if (count($parts) === 3 && $parts[0] === 'api' && $parts[1] === 'csv' && $_SERVE
                     'detail' => 'Failed to delete file'
                 ]
             ]
-        ]);
+        ]));
     }
     exit;
-}
-
-// Handle file structure endpoint
-if (count($parts) === 4 && $parts[0] === 'api' && $parts[1] === 'csv' && $parts[3] === 'structure' && false) {
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        try {
-            $csvHandler = new CsvHandler($filePath);
-            echo json_encode($csvHandler->getHeaders());
-        } catch (Exception $e) {
-            http_response_code(400);
-            echo json_encode([
-                'errors' => [
-                    [
-                        'status' => '400',
-                        'title' => 'Bad Request',
-                        'detail' => $e->getMessage()
-                    ]
-                ]
-            ]);
-        }
-        exit;
-    }
 }
 
 
@@ -461,7 +482,7 @@ if (count($parts) === 4 && $parts[0] === 'api' && $parts[1] === 'csv' && $parts[
 $filename = $parts[2] ?? null;
 if (!$filename) {
     http_response_code(400);
-    echo json_encode([
+    die(json_encode([
         'errors' => [
             [
                 'status' => '400',
@@ -469,7 +490,7 @@ if (!$filename) {
                 'detail' => 'Filename is required'
             ]
         ]
-    ]);
+    ]));
     exit;
 }
 
@@ -480,7 +501,7 @@ try {
     switch ($_SERVER['REQUEST_METHOD']) {
         case 'GET':
             if (isset($parts[3]) && $parts[3] === 'structure') {
-                echo json_encode($csvHandler->getHeaders());
+                die(json_encode($csvHandler->getHeaders()));
             } else if (isset($parts[3]) && $parts[3] === 'search') {
                 // Handle search request
                 parse_str($query, $searchParams);
@@ -489,7 +510,7 @@ try {
                 
                 if (empty($searchParams)) {
                     http_response_code(400);
-                    echo json_encode([
+                    die(json_encode([
                         'errors' => [
                             [
                                 'status' => '400',
@@ -497,15 +518,16 @@ try {
                                 'detail' => 'Search criteria required'
                             ]
                         ]
-                    ]);
+                    ]));
                     exit;
                 }
 
-                $offset = isset($searchParams['page']['offset']) ? (int)($searchParams['page']['offset']): 0 ;
-                $perPage = isset($searchParams['page']['limit']) ? (int)$searchParams['page']['limit'] : 10;
+                $offset = isset($searchParams['page']['offset']) ? (int)(sanitizeInput($searchParams['page']['offset'])): 0 ;
+                error_log("offset: ".$offset);
+                $perPage = isset($searchParams['page']['limit']) ? (int)(sanitizeInput($searchParams['page']['limit'])) : 10;
                 unset($searchParams['page']); // Remove pagination parameters from search criteria
                 
-                echo json_encode($csvHandler->search($searchParams, $exactMatch, $offset, $perPage));
+                die(json_encode($csvHandler->search($searchParams, $exactMatch, $offset, $perPage)));
             } else if (isset($parts[3])) {
                 // Get specific record
                 $id = (int)$parts[3];
@@ -513,7 +535,7 @@ try {
                 
                 if ($data === null) {
                     http_response_code(404);
-                    echo json_encode([
+                    die(json_encode([
                         'errors' => [
                             [
                                 'status' => '404',
@@ -521,17 +543,18 @@ try {
                                 'detail' => 'The requested resource was not found'
                             ]
                         ]
-                    ]);
+                    ]));
                     exit;
                 }
                 
-                echo json_encode($data);
+                die(json_encode($data));
             } else {
                 // Get all records with pagination
                 parse_str($query, $params);
-                $offset = isset($params['page']['offset']) ? (int)$params['page']['offset'] : 0;
-                $perPage = isset($params['page']['limit']) ? (int)$params['page']['limit'] : 10;
-                echo json_encode($csvHandler->getAll($offset, $perPage));
+                $offset = isset($params['page']['offset']) ? (int)(sanitizeInput($params['page']['offset'])) : 0;
+                error_log("offset: ".$offset);
+                $perPage = isset($params['page']['limit']) ? (int)(sanitizeInput($params['page']['limit'])) : 10;
+                die(json_encode($csvHandler->getAll($offset, $perPage)));
             }
             break;
 
@@ -540,7 +563,7 @@ try {
             $input = json_decode(file_get_contents('php://input'), true);
             if ($input === null || !isset($input['data']['attributes'])) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode ([
                     'errors' => [
                         [
                             'status' => '400',
@@ -548,23 +571,24 @@ try {
                             'detail' => 'Invalid JSON:API request format'
                         ]
                     ]
-                ]);
+                ]));
                 exit;
             }
 
             try {
                 $id = $csvHandler->create($input['data']['attributes']);
                 http_response_code(201);
-                echo json_encode([
+                die(json_encode([
                     'data' => [
                         'type' => pathinfo($filename, PATHINFO_FILENAME),
                         'id' => (string)$id,
                         'attributes' => $input['data']['attributes']
                     ]
-                ]);
+                ]));
+                
             } catch (InvalidArgumentException $e) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode([
                     'errors' => [
                         [
                             'status' => '400',
@@ -572,14 +596,14 @@ try {
                             'detail' => $e->getMessage()
                         ]
                     ]
-                ]);
+                ])); 
             }
             break;
 
         case 'PUT':
             if (!isset($parts[3])) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode ([
                     'errors' => [
                         [
                             'status' => '400',
@@ -587,14 +611,14 @@ try {
                             'detail' => 'ID is required'
                         ]
                     ]
-                ]);
+                ]));
                 exit;
             }
 
             $input = json_decode(file_get_contents('php://input'), true);
             if ($input === null || !isset($input['data']['attributes'])) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode([
                     'errors' => [
                         [
                             'status' => '400',
@@ -602,7 +626,7 @@ try {
                             'detail' => 'Invalid JSON:API request format'
                         ]
                     ]
-                ]);
+                ]));
                 exit;
             }
 
@@ -612,7 +636,7 @@ try {
                 
                 if (!$success) {
                     http_response_code(404);
-                    echo json_encode([
+                    die(json_encode([
                         'errors' => [
                             [
                                 'status' => '404',
@@ -620,21 +644,21 @@ try {
                                 'detail' => 'The requested resource was not found'
                             ]
                         ]
-                    ]);
+                    ]));
                     exit;
                 }
 
                 http_response_code(200);
-                echo json_encode([
+                die(json_encode([
                     'data' => [
                         'type' => pathinfo($filename, PATHINFO_FILENAME),
                         'id' => (string)$id,
                         'attributes' => $input['data']['attributes']
                     ]
-                ]);
+                ]));
             } catch (InvalidArgumentException $e) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode([
                     'errors' => [
                         [
                             'status' => '400',
@@ -642,14 +666,14 @@ try {
                             'detail' => $e->getMessage()
                         ]
                     ]
-                ]);
+                ]));
             }
             break;
 
         case 'DELETE':
             if (!isset($parts[3])) {
                 http_response_code(400);
-                echo json_encode([
+                die(json_encode([
                     'errors' => [
                         [
                             'status' => '400',
@@ -657,7 +681,7 @@ try {
                             'detail' => 'ID is required'
                         ]
                     ]
-                ]);
+                ]));
                 exit;
             }
 
@@ -666,7 +690,7 @@ try {
             
             if (!$success) {
                 http_response_code(404);
-                echo json_encode([
+                die(json_encode([
                     'errors' => [
                         [
                             'status' => '404',
@@ -674,7 +698,7 @@ try {
                             'detail' => 'The requested resource was not found'
                         ]
                     ]
-                ]);
+                ]));
                 exit;
             }
 
@@ -683,7 +707,7 @@ try {
 
         default:
             http_response_code(405);
-            echo json_encode([
+            die(json_encode([
                 'errors' => [
                     [
                         'status' => '405',
@@ -691,12 +715,12 @@ try {
                         'detail' => 'The requested method is not allowed'
                     ]
                 ]
-            ]);
+            ]));
             break;
     }
 } catch (Exception $e) {
     http_response_code(400);
-    echo json_encode([
+    die(json_encode([
         'errors' => [
             [
                 'status' => '400',
@@ -704,5 +728,29 @@ try {
                 'detail' => $e->getMessage()
             ]
         ]
-    ]);
+    ]));
 } 
+
+
+// Handle file structure endpoint
+if (count($parts) === 4 && $parts[0] === 'api' && $parts[1] === 'csv' && $parts[3] === 'structure') {
+    error_log("get file structure: ".print_r($parts,true));
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        try {
+            $csvHandler = new CsvHandler($filePath);
+            die(json_encode ($csvHandler->getHeaders()));
+        } catch (Exception $e) {
+            http_response_code(400);
+            die(json_encode([
+                'errors' => [
+                    [
+                        'status' => '400',
+                        'title' => 'Bad Request',
+                        'detail' => $e->getMessage()
+                    ]
+                ]
+            ]));
+        }
+        exit;
+    }
+}

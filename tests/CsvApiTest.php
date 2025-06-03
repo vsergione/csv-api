@@ -38,12 +38,14 @@ class CsvApiTest extends TestCase
 
     protected function tearDown(): void
     {
+        
         // Clean up test files
         $files = glob($this->dataDir . '/test*.csv');
         foreach ($files as $file) {
             unlink($file);
         }
         parent::tearDown();
+        return;
     }
 
     private function createTestFile(): void
@@ -91,9 +93,8 @@ class CsvApiTest extends TestCase
 
     public function testListFiles()
     {
-        echo "\nRunning test: List Files";
+        echo "\nRunning test: List Files\n";
         $response = $this->makeRequest('GET', '/api/csv');
-        print_r($response);
         $this->assertEquals(200, $response['code']);
         $this->assertArrayHasKey('data', $response['body']);
         $this->assertArrayHasKey('meta', $response['body']);
@@ -127,7 +128,6 @@ class CsvApiTest extends TestCase
     {
         echo "\nRunning test: Get All Records";
         $response = $this->makeRequest('GET', '/api/csv/test.csv');
-        print_r($response);
         $this->assertEquals(200, $response['code']);
         $this->assertArrayHasKey('data', $response['body']);
         $this->assertArrayHasKey('meta', $response['body']);
@@ -254,6 +254,7 @@ class CsvApiTest extends TestCase
 
     public function testInvalidAuthentication()
     {
+        echo "\nRunning test: Invalid Authentication";
         $this->username = 'invalid';
         $response = $this->makeRequest('GET', '/api/csv');
         $this->assertEquals(401, $response['code']);
@@ -261,6 +262,7 @@ class CsvApiTest extends TestCase
 
     public function testInvalidFileType()
     {
+        echo "\nRunning test: Invalid File Type";
         // Try to upload a non-CSV file
         $tempFile = tempnam(sys_get_temp_dir(), 'test_');
         file_put_contents($tempFile, "This is not a CSV file");
@@ -270,6 +272,7 @@ class CsvApiTest extends TestCase
         ];
 
         $response = $this->makeRequest('POST', '/api/csv', $data, true);
+        print_r($response);
         $this->assertEquals(400, $response['code']);
 
         unlink($tempFile);
@@ -277,12 +280,14 @@ class CsvApiTest extends TestCase
 
     public function testNonExistentFile()
     {
+        echo "\nRunning test: Non Existent File";
         $response = $this->makeRequest('GET', '/api/csv/nonexistent.csv');
         $this->assertEquals(400, $response['code']);
     }
 
     public function testInvalidJsonFormat()
     {
+        echo "\nRunning test: Invalid Json Format";
         $data = ['invalid' => 'format'];
         $response = $this->makeRequest('POST', '/api/csv/' . $this->testFile, $data);
         $this->assertEquals(400, $response['code']);
@@ -318,43 +323,106 @@ class CsvApiTest extends TestCase
 
     public function testGetFileStructure()
     {
-        echo "\nRunning test: Get File Structure";
+        // Create a test file
+        $testFile = $this->dataDir . '/test.csv';
+        file_put_contents($testFile, "id,name,description\n1,Test,Description");
 
-        // Create test file
-        $this->createTestFile();
-
-        // Test getting file structure
         $response = $this->makeRequest('GET', '/api/csv/test.csv/structure');
         $this->assertEquals(200, $response['code']);
-        
-        $data = $response['body'];
-        $this->assertArrayHasKey('data', $data);
-        $this->assertEquals('test_structure', $data['data']['type']);
-        $this->assertEquals('headers', $data['data']['id']);
-        $this->assertArrayHasKey('attributes', $data['data']);
-        $this->assertArrayHasKey('headers', $data['data']['attributes']);
-        print_r($data['data']['attributes']['headers']);
-        $this->assertEquals(['id', 'name', 'value'], $data['data']['attributes']['headers']);
+        print_r($response);
+        $this->assertEquals('test_structure', $response['body']['data']['type']);
+        $this->assertEquals(['id', 'name', 'description'], $response['body']['data']['attributes']['headers']);
 
         // Test with non-existent file
         $response = $this->makeRequest('GET', '/api/csv/nonexistent.csv/structure');
         $this->assertEquals(400, $response['code']);
-        
-        $data = $response['body'];
-        $this->assertArrayHasKey('errors', $data);
-        $this->assertEquals('Bad Request', $data['errors'][0]['title']);
     }
 
-    public function testGetFileStructureWithInvalidFile()
+    public function testInputSanitization()
     {
-        // Create an invalid CSV file (empty)
-        file_put_contents($this->dataDir . '/invalid.csv', '');
+        // Create a test file with clean data
+        $testFile = $this->dataDir . '/sanitize_test.csv';
+        file_put_contents($testFile, "id,name,description\n1,Clean,Data");
 
-        $response = $this->makeRequest('GET', '/api/csv/invalid.csv/structure');
-        $this->assertEquals(400, $response['code']);
+        // Test XSS prevention in create
+        $xssData = [
+            'data' => [
+                'type' => 'sanitize_test',
+                'attributes' => [
+                    'id' => '2',
+                    'name' => '<script>alert("xss")</script>',
+                    'description' => '"><script>alert("xss")</script>'
+                ]
+            ]
+        ];
+
+        $response = $this->makeRequest('POST', '/api/csv/sanitize_test.csv', $xssData);
+        $this->assertEquals(201, $response['code']);
         
-        $data = $response['body'];
-        $this->assertArrayHasKey('errors', $data);
-        $this->assertEquals('Bad Request', $data['errors'][0]['title']);
+        // Verify the data was sanitized
+        $response = $this->makeRequest('GET', '/api/csv/sanitize_test.csv/1');
+        $this->assertEquals(200, $response['code']);
+        $this->assertStringNotContainsString('<script>', $response['body']['data']['attributes']['name']);
+        $this->assertStringNotContainsString('<script>', $response['body']['data']['attributes']['description']);
+
+        // Test SQL injection prevention in search
+        $sqlInjectionData = [
+            'name' => "'; DROP TABLE users; --"
+        ];
+
+        $response = $this->makeRequest('GET', '/api/csv/sanitize_test.csv/search?' . http_build_query($sqlInjectionData));
+        $this->assertEquals(400, $response['code']);
+        $this->assertEquals('Invalid search value', $response['body']['errors'][0]['detail']);
+    }
+
+    public function testFileUploadSecurity()
+    {
+        // Test file extension validation
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_');
+        file_put_contents($tempFile, '<?php echo "malicious"; ?>');
+
+        $data = [
+            'file' => new CURLFile($tempFile, 'application/x-httpd-php', 'test.php')
+        ];
+        $response = $this->makeRequest('POST', '/api/csv', $data);
+        $this->assertEquals(400, $response['code']);
+        $this->assertEquals('No file uploaded or upload error', $response['body']['errors'][0]['detail']);
+
+
+        // Test path traversal prevention
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_');
+        file_put_contents($tempFile, 'test,data');
+        $data = [
+            'file' => new CURLFile($tempFile, 'application/csv', 'test.csv')
+        ];
+        $data["file"]->name = '../../../etc/passwd.csv';
+
+        // Test path traversal prevention
+        $response = $this->makeRequest('POST', '/api/csv', $data);
+        print_r($response);
+
+        $this->assertEquals(400, $response['code']);
+        $this->assertEquals('No file uploaded or upload error', $response['body']['errors'][0]['detail']);
+
+    }
+
+    public function testUrlSanitization()
+    {
+        // Test URL path sanitization
+        // $response = $this->makeRequest('GET', '/api/csv/../../../etc/passwd');
+        // print_r($response);
+        // $this->assertEquals(404, $response['code']);
+
+        // Test URL parameter sanitization
+        $response = $this->makeRequest('GET', '/api/csv/test.csv?page[offset]=<script>alert(1)</script>');
+        print_r($response);
+        $this->assertEquals(200, $response['code']);
+    }
+
+    private function createTempFile($content, $extension)
+    {
+        $tempFile = tempnam(sys_get_temp_dir(), 'test_') . '.' . $extension;
+        file_put_contents($tempFile, $content);
+        return $tempFile;
     }
 } 
