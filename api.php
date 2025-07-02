@@ -1,9 +1,75 @@
 <?php
 
-// Basic Auth Configuration
-define('AUTH_USERNAME', 'admin');   // TODO: change to your username
-define('AUTH_PASSWORD', 'secret123');   // TODO: change to your password
+// JWT Configuration
+define('JWT_SECRET', 'your-secret-key-change-this-in-production');   // TODO: change to a secure secret
+define('JWT_ALGORITHM', 'HS256');
+define('JWT_EXPIRY', 3600); // 1 hour
 define('DATA_DIR', __DIR__ . '/data');   // TODO: change to your data directory
+
+// User credentials (in production, use a database)
+$validUsers = [
+    'admin' => password_hash('secret123', PASSWORD_DEFAULT)
+];
+
+// JWT Helper Functions
+function base64url_encode($data) {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function base64url_decode($data) {
+    return base64_decode(strtr($data, '-_', '+/') . str_repeat('=', 3 - (3 + strlen($data)) % 4));
+}
+
+function generateJWT($username) {
+    $header = json_encode(['typ' => 'JWT', 'alg' => JWT_ALGORITHM]);
+    $payload = json_encode([
+        'sub' => $username,
+        'iat' => time(),
+        'exp' => time() + JWT_EXPIRY
+    ]);
+    
+    $base64Header = base64url_encode($header);
+    $base64Payload = base64url_encode($payload);
+    
+    $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, JWT_SECRET, true);
+    $base64Signature = base64url_encode($signature);
+    
+    return $base64Header . "." . $base64Payload . "." . $base64Signature;
+}
+
+function verifyJWT($token) {
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) {
+        return false;
+    }
+    
+    list($header, $payload, $signature) = $parts;
+    
+    $validSignature = base64url_encode(hash_hmac('sha256', $header . "." . $payload, JWT_SECRET, true));
+    
+    if (!hash_equals($signature, $validSignature)) {
+        return false;
+    }
+    
+    $payloadData = json_decode(base64url_decode($payload), true);
+    
+    if (!$payloadData || !isset($payloadData['exp']) || $payloadData['exp'] < time()) {
+        return false;
+    }
+    
+    return $payloadData;
+}
+
+function extractTokenFromHeader() {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        return $matches[1];
+    }
+    
+    return null;
+}
 
 // Input sanitization functions
 function sanitizeInput($input) {
@@ -46,36 +112,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
-// Basic Auth Function
+// JWT Auth Function
 function checkAuth() {
-    if (!isset($_SERVER['PHP_AUTH_USER']) || !isset($_SERVER['PHP_AUTH_PW'])) {
-        header('WWW-Authenticate: Basic realm="CSV API"');
+    global $validUsers;
+    
+    // Skip auth for login endpoint
+    $requestUri = filter_var($_SERVER['REQUEST_URI'], FILTER_SANITIZE_URL);
+    $path = parse_url($requestUri, PHP_URL_PATH);
+    $parts = explode("/", explode(basename(__FILE__) . "/", $path)[1] ?? '');
+    
+    if (count($parts) >= 3 && $parts[0] === 'api' && $parts[1] === 'auth' && $parts[2] === 'login') {
+        return;
+    }
+    
+    $token = extractTokenFromHeader();
+    
+    if (!$token) {
         header('HTTP/1.0 401 Unauthorized');
         die(json_encode([
             'errors' => [
                 [
                     'status' => '401',
                     'title' => 'Unauthorized',
-                    'detail' => 'Authentication required'
+                    'detail' => 'JWT token required'
                 ]
             ]
         ]));
         exit;
     }
-
-    if ($_SERVER['PHP_AUTH_USER'] !== AUTH_USERNAME || $_SERVER['PHP_AUTH_PW'] !== AUTH_PASSWORD) {
+    
+    $payload = verifyJWT($token);
+    if (!$payload) {
         header('HTTP/1.0 401 Unauthorized');
-        die(json_encode ([
+        die(json_encode([
             'errors' => [
                 [
                     'status' => '401',
                     'title' => 'Unauthorized',
-                    'detail' => 'Invalid credentials'
+                    'detail' => 'Invalid or expired JWT token'
                 ]
             ]
         ]));
         exit;
     }
+    
+    // Store user info in global variable for use in other functions
+    $GLOBALS['currentUser'] = $payload['sub'];
 }
 
 // Check authentication before processing any request
@@ -163,7 +245,7 @@ class CsvHandler {
         return [
             'data' => $paginatedResources,
             'meta' => [
-                'total' => $total,
+                'totalRecords' => $total,
                 'page' => [
                     'offset' => $offset,
                     'limit' => $perPage
@@ -223,7 +305,7 @@ class CsvHandler {
         return [
             'data' => $paginatedResults,
             'meta' => [
-                'total' => $total,
+                'totalRecords' => $total,
                 'page' => [
                     'offset' => $offset,
                     'limit' => $perPage
@@ -299,13 +381,74 @@ $path = parse_url($requestUri, PHP_URL_PATH);
 $query = parse_url($requestUri, PHP_URL_QUERY);
 
 // Extract the parts of the path
-$parts =explode("/",explode(basename(__FILE__)."/", $path)[1]);
-error_log("parts: ".print_r($parts,true));
+$parts = explode("/", explode(basename(__FILE__) . "/", $path)[1] ?? '');
+error_log("parts: " . print_r($parts, true));
 
-// Validate path structure for other endpoints
+// Handle authentication endpoints
+if (count($parts) >= 3 && $parts[0] === 'api' && $parts[1] === 'auth') {
+    if ($parts[2] === 'login' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $input = json_decode(file_get_contents('php://input'), true);
+        
+        if (!$input || !isset($input['username']) || !isset($input['password'])) {
+            http_response_code(400);
+            die(json_encode([
+                'errors' => [
+                    [
+                        'status' => '400',
+                        'title' => 'Bad Request',
+                        'detail' => 'Username and password are required'
+                    ]
+                ]
+            ]));
+        }
+        
+        $username = sanitizeInput($input['username']);
+        $password = $input['password'];
+        
+        if (!isset($validUsers[$username]) || !password_verify($password, $validUsers[$username])) {
+            http_response_code(401);
+            die(json_encode([
+                'errors' => [
+                    [
+                        'status' => '401',
+                        'title' => 'Unauthorized',
+                        'detail' => 'Invalid credentials'
+                    ]
+                ]
+            ]));
+        }
+        
+        $token = generateJWT($username);
+        
+        die(json_encode([
+            'data' => [
+                'type' => 'auth_token',
+                'id' => 'login',
+                'attributes' => [
+                    'token' => $token,
+                    'expires_in' => JWT_EXPIRY,
+                    'token_type' => 'Bearer'
+                ]
+            ]
+        ]));
+    }
+    
+    http_response_code(404);
+    die(json_encode([
+        'errors' => [
+            [
+                'status' => '404',
+                'title' => 'Not Found',
+                'detail' => 'The requested resource was not found'
+            ]
+        ]
+    ]));
+}
+
+// Validate path structure for CSV endpoints
 if (count($parts) < 2 || $parts[0] !== 'api' || $parts[1] !== 'csv') {
     http_response_code(404);
-    die(json_encode ([
+    die(json_encode([
         'errors' => [
             [
                 'status' => '404',
@@ -338,7 +481,7 @@ try {
             die(json_encode([
                 'data' => $fileList,
                 'meta' => [
-                    'total' => count($fileList)
+                    'totalRecords' => count($fileList)
                 ]
             ]));
             exit;
@@ -503,31 +646,7 @@ try {
             if (isset($parts[3]) && $parts[3] === 'structure') {
                 die(json_encode($csvHandler->getHeaders()));
             } else if (isset($parts[3]) && $parts[3] === 'search') {
-                // Handle search request
-                parse_str($query, $searchParams);
-                $exactMatch = isset($searchParams['exact']) && $searchParams['exact'] === 'true';
-                unset($searchParams['exact']); // Remove the exact parameter from search criteria
                 
-                if (empty($searchParams)) {
-                    http_response_code(400);
-                    die(json_encode([
-                        'errors' => [
-                            [
-                                'status' => '400',
-                                'title' => 'Bad Request',
-                                'detail' => 'Search criteria required'
-                            ]
-                        ]
-                    ]));
-                    exit;
-                }
-
-                $offset = isset($searchParams['page']['offset']) ? (int)(sanitizeInput($searchParams['page']['offset'])): 0 ;
-                error_log("offset: ".$offset);
-                $perPage = isset($searchParams['page']['limit']) ? (int)(sanitizeInput($searchParams['page']['limit'])) : 10;
-                unset($searchParams['page']); // Remove pagination parameters from search criteria
-                
-                die(json_encode($csvHandler->search($searchParams, $exactMatch, $offset, $perPage)));
             } else if (isset($parts[3])) {
                 // Get specific record
                 $id = (int)$parts[3];
@@ -549,11 +668,22 @@ try {
                 
                 die(json_encode($data));
             } else {
-                // Get all records with pagination
                 parse_str($query, $params);
-                $offset = isset($params['page']['offset']) ? (int)(sanitizeInput($params['page']['offset'])) : 0;
-                error_log("offset: ".$offset);
-                $perPage = isset($params['page']['limit']) ? (int)(sanitizeInput($params['page']['limit'])) : 10;
+                $offset = isset($params['page'][$filename]['offset']) ? (int)(sanitizeInput($params['page'][$filename]['offset'])) : 0;
+                $perPage = isset($params['page'][$filename]['limit']) ? (int)(sanitizeInput($params['page'][$filename]['limit'])) : 10;
+                $exactMatch = false;
+                if(isset($params['filter'])) {
+                    // Handle search request
+                    $tmp = explode(",",$params['filter']);
+                    $searchParams = [];
+                    foreach($tmp as $t) {
+                        $t = explode("=",$t);
+                        $searchParams[$t[0]] = $t[1];
+                    }
+                    die(json_encode($csvHandler->search($searchParams, $exactMatch, $offset, $perPage)));
+                }
+                // Get all records with pagination
+                
                 die(json_encode($csvHandler->getAll($offset, $perPage)));
             }
             break;
@@ -600,7 +730,7 @@ try {
             }
             break;
 
-        case 'PUT':
+        case 'PATCH':
             if (!isset($parts[3])) {
                 http_response_code(400);
                 die(json_encode ([

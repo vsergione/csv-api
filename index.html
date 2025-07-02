@@ -7,7 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.13.1/underscore-min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/softaccel/apiator.js@main/apiator.js"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/gh/softaccel/apiator.js@main/apiator.js"></script> -->
+    <script src="apiator.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <style>
         body {
@@ -85,20 +86,59 @@
         </div>
 
         <div id="mainContent" class="hidden">
-            <div class="mb-4">
-                <div class="input-group">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div class="input-group" style="max-width: 400px;">
                     <input type="file" class="form-control" id="fileInput" accept=".csv">
                     <button class="btn btn-primary" onclick="uploadFile()">Upload</button>
                 </div>
+                <button class="btn btn-outline-secondary" onclick="logout()">Logout</button>
             </div>
 
             <h5 class="mb-3">Files</h5>
-            <div class="file-list" id="fileList"></div>
+            <div class="file-list" id="fileList">
+                <div class="file-item p-2 border-bottom ${currentFile === '<%= id %>' ? 'active' : ''}" onclick="viewFile('<%= id %>')">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><%= attributes.filename %></span>
+                        <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteFile('<%= id %>')">Delete</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="main-content">
-        <div id="fileContent"></div>
+        <div id="fileContent">
+        </div>
+        <template id="fileContentTemplate">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4>${filename}</h4>
+                <button class="btn btn-primary" onclick="showNewRecordModal()">New Record</button>
+            </div>
+            <div class="table-responsive">
+                <form id="filterForm" class="d-none"><button type="submit" class="btn btn-primary" id="filterButton"></button></form>
+                <table class="table table-striped table-hover">
+                    <thead><tr></tr></thead>
+                    <tbody data-filter="#filterForm" data-paging="#recordsPaging" data-pagesizeinp="#recordsPagesizeInp" data-totalrecscount="#recordsTotalEntries" data-type="${filename}"><tr></tr></tbody>
+                </table>
+                <div class="">
+                    <div class="btn-group" id="recordsPaging" data-pagesize="10">
+                        <button name="first" class="btn btn-outline-secondary" title="0">&lt;&lt;</button>
+                        <button name="prev" class="btn btn-outline-secondary" title="-20">&lt;</button>
+                        <button name="page" class="btn btn-outline-secondary" title="0">1</button>
+                        <button name="next" class="btn btn-outline-secondary" title="20">&gt;</button>
+                        <button name="last" class="btn btn-outline-secondary" title="140">&gt;&gt;</button>
+                    </div>
+                    <select id="recordsPagesizeInp">
+                        <option selected>10</option>
+                        <option >20</option>
+                        <option >30</option>
+                        <option >40</option>
+                        <option>50</option>
+                        <option>75</option>
+                    </select> inregistrari pe pagina din <span style="font-size: 1rem" id="recordsTotalEntries"></span> inregistrari
+                </div>
+            </div>
+        </template>
     </div>
 
     <!-- Edit Modal -->
@@ -125,7 +165,11 @@
                     <button type="button" class="btn-close" onclick="closeNewRecordModal()"></button>
                 </div>
                 <div class="modal-body">
-                    <div id="newRecordForm"></div>
+                    <form id="newRecordForm"></form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="$(this).parents('.modal').modal('hide')">Cancel</button>
+                    <button type="submit" class="btn btn-primary" type="submit" form="newRecordForm">Save</button>
                 </div>
             </div>
         </div>
@@ -164,9 +208,10 @@
         }
 
         function getAuthHeader() {
-            const username = sanitizeInput(document.getElementById('username').value);
-            const password = sanitizeInput(document.getElementById('password').value);
-            return 'Basic ' + btoa(username + ':' + password);
+            if (authToken) {
+                return 'Bearer ' + authToken;
+            }
+            return '';
         }
 
         function authenticate() {
@@ -179,15 +224,19 @@
             }
 
             $.ajax({
-                url: `${API_URL}/api/csv`,
-                type: 'GET',
-                headers: {
-                    'Authorization': getAuthHeader()
-                },
-                success: function() {
+                url: `${API_URL}/api/auth/login`,
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    username: username,
+                    password: password
+                }),
+                success: function(response) {
+                    authToken = response.data.attributes.token;
+                    // Store token in localStorage for persistence
+                    localStorage.setItem('authToken', authToken);
                     document.getElementById('mainContent').classList.remove('hidden');
                     document.querySelector('.auth-form').classList.add('collapsed');
-                    //document.querySelector('.auth-toggle').textContent = 'Logout';
                     listFiles();
                 },
                 error: function(xhr) {
@@ -200,19 +249,36 @@
             });
         }
 
+        // Check for existing token on page load
+        function checkExistingToken() {
+            const storedToken = localStorage.getItem('authToken');
+            if (storedToken) {
+                authToken = storedToken;
+                document.getElementById('mainContent').classList.remove('hidden');
+                document.querySelector('.auth-form').classList.add('collapsed');
+                listFiles();
+            }
+        }
+
+        function logout() {
+            authToken = null;
+            localStorage.removeItem('authToken');
+            document.getElementById('mainContent').classList.add('hidden');
+            document.querySelector('.auth-form').classList.remove('collapsed');
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            $('#fileContent').empty();
+            currentFile = null;
+        }
+
         function listFiles() {
             $("#fileList").apiator({
                 url: `${API_URL}/api/csv`,
-                template: `
-                    <div class="file-item p-2 border-bottom ${currentFile === '<%= id %>' ? 'active' : ''}" onclick="viewFile('<%= id %>')">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span><%= attributes.filename %></span>
-                            <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteFile('<%= id %>')">Delete</button>
-                        </div>
-                    </div>
-                `,
-                headers: {
-                    'Authorization': getAuthHeader()
+                ajaxOpts: {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Accept': 'application/vnd.api+json'
+                    }
                 },
                 on: {
                     load: function(collection) {
@@ -259,342 +325,98 @@
         }
 
         function viewFile(filename) {
-            currentFile = filename;
-            // Update active state in file list
-            document.querySelectorAll('.file-item').forEach(item => {
-                item.classList.remove('active');
-                if (item.getAttribute('onclick').includes(filename)) {
-                    item.classList.add('active');
-                }
-            });
-            loadFileContent();
-        }
-
-        function loadFileContent(offset = 0) {
-            currentPage = offset;
-            //document.getElementById('searchValue').value = '';
-            //document.getElementById('exactMatch').checked = false;
-            
             $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}`,
+                url: `${API_URL}/api/csv/${filename}/structure`,
                 type: 'GET',
                 headers: {
-                    'Authorization': getAuthHeader()
-                },
-                data: {
-                    'page[offset]': offset,
-                    'page[limit]': pageSize
+                    'Authorization': `Bearer ${authToken}`,
+                    'Accept': 'application/vnd.api+json'
                 },
                 success: function(response) {
-                    displayFileContent(response);
-                },
-                error: function(xhr) {
-                    alert('Error loading file: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                }
-            });
-        }
-
-        function displayFileContent(response) {
-            const content = $('#fileContent');
-            content.empty();
-
-            if (!response.data || response.data.length === 0) {
-                content.html('<p class="text-muted">No records found</p>');
-                return;
-            }
-
-            const headers = Object.keys(response.data[0].attributes);
-            let table = `
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h4>${currentFile}</h4>
-                    <button class="btn btn-primary" onclick="showNewRecordModal()">New Record</button>
-                </div>
-                <div class="search-form">
-                    <form id="searchForm" onsubmit="handleSearch(event)">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <label class="form-label">Search Field</label>
-                                    <select class="form-select" id="searchField">
-                                        ${headers.map(header => `<option value="${header}">${header}</option>`).join('')}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    <label class="form-label">Search Value</label>
-                                    <input type="text" class="form-control" id="searchValue" placeholder="Enter search value">
-                                </div>
-                            </div>
-                            <div class="col-md-2">
-                                <div class="form-group">
-                                    <label class="form-label">&nbsp;</label>
-                                    <button type="submit" class="btn btn-primary w-100">Search</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="exactMatch">
-                            <label class="form-check-label" for="exactMatch">
-                                Exact match
-                            </label>
-                        </div>
-                    </form>
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                ${headers.map(header => `<th>${header}</th>`).join('')}
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-
-            response.data.forEach(record => {
-                table += '<tr>';
-                headers.forEach(header => {
-                    table += `<td>${record.attributes[header]}</td>`;
-                });
-                table += `
-                    <td>
-                        <div class="btn-group">
-                            <button class="btn btn-sm btn-outline-primary" onclick="editRecord('${record.id}')">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteRecord('${record.id}')">Delete</button>
-                        </div>
-                    </td>
-                </tr>`;
-            });
-
-            table += '</tbody></table></div>';
-
-            // Add pagination
-            const total = response.meta.total;
-            const totalPages = Math.ceil(total / pageSize);
-            let pagination = `
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <div class="d-flex align-items-center">
-                        <label class="me-2">Page size:</label>
-                        <select class="form-select form-select-sm" style="width: auto;" onchange="changePageSize(this.value)">
-                            <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
-                            <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
-                            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
-                            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
-                        </select>
-                    </div>
-                    <nav aria-label="Page navigation">
-                        <ul class="pagination mb-0">
-                            <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
-                                <a class="page-link" href="#" onclick="loadFileContent(0)">First</a>
-                            </li>
-                            <li class="page-item ${currentPage === 0 ? 'disabled' : ''}">
-                                <a class="page-link" href="#" onclick="loadFileContent(${currentPage - pageSize})">Previous</a>
-                            </li>
-                            <li class="page-item disabled">
-                                <span class="page-link">Page ${Math.floor(currentPage / pageSize) + 1} of ${totalPages}</span>
-                            </li>
-                            <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
-                                <a class="page-link" href="#" onclick="loadFileContent(${currentPage + pageSize})">Next</a>
-                            </li>
-                            <li class="page-item ${currentPage + pageSize >= total ? 'disabled' : ''}">
-                                <a class="page-link" href="#" onclick="loadFileContent(${(totalPages - 1) * pageSize})">Last</a>
-                            </li>
-                        </ul>
-                    </nav>
-                </div>
-            `;
-
-            content.html(table + pagination);
-        }
-
-        function showNewRecordModal() {
-            if (!currentFile) {
-                alert('Please select a file first');
-                return;
-            }
-
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}/structure`,
-                type: 'GET',
-                headers: {
-                    'Authorization': getAuthHeader()
-                },
-                success: function(response) {
-                    const form = document.getElementById('newRecordForm');
-                    form.innerHTML = '';
-
-                    response.data.attributes.headers.forEach(header => {
-                        form.innerHTML += `
-                            <div class="form-group mb-3">
-                                <label class="form-label">${header}</label>
-                                <input type="text" class="form-control" id="new_${header}" required>
-                            </div>
-                        `;
+                    fields = response.data.attributes.headers;
+                    loadFileContent(filename,fields);
+                    document.querySelectorAll('.file-item').forEach(item => {
+                        item.classList.remove('active');
+                        if (item.getAttribute('onclick').includes(filename)) {
+                            item.classList.add('active');
+                        }
                     });
-
-                    form.innerHTML += `
-                        <div class="d-flex justify-content-end gap-2">
-                            <button class="btn btn-secondary" onclick="closeNewRecordModal()">Cancel</button>
-                            <button class="btn btn-primary" onclick="saveNewRecord()">Save</button>
-                        </div>
-                    `;
-
-                    new bootstrap.Modal(document.getElementById('newRecordModal')).show();
-                },
-                error: function(xhr) {
-                    alert('Error loading file structure: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
                 }
             });
         }
 
-        function closeNewRecordModal() {
-            bootstrap.Modal.getInstance(document.getElementById('newRecordModal')).hide();
-        }
-
-        function editRecord(id) {
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}/${id}`,
-                type: 'GET',
-                headers: {
-                    'Authorization': getAuthHeader()
-                },
-                success: function(response) {
-                    showEditModal(response.data);
-                },
-                error: function(xhr) {
-                    alert('Error loading record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                }
+        function loadFileContent(filename,fields,offset = 0) {
+            const template = $('#fileContentTemplate').html().replace(/\&gt;/g,'>').replace(/\&lt;/g,'<');
+            var html = $(eval("`"+template+"`"));
+            let headerRow = html.find('thead>tr');
+            let tbodyRow = html.find('tbody>tr');
+            fields.forEach((field,index) => {
+                $(`<th>${field}<div class="form-group"><input type="text" class="form-control" name="${field}" data-operator="=" form="filterForm" onkeyup="this.form.filterButton.click()"></div></th>`).appendTo(headerRow);
+                $(`<td><%=attributes.${field}%></td>`).appendTo(tbodyRow);
             });
+            $(`<td>
+                    <button onclick='showEditModal($(this).data().instance)'>Edit</button>
+                    <button onclick="if(confirm('Really delete?')){ $(this).data().instance.delete() }">Delete</button>
+                </td>`).appendTo(tbodyRow);
+            $("#fileContent").html(html);
+            let instance = tbodyRow.parent().apiator({
+                url: `${API_URL}/api/csv/${filename}`,
+                ajaxOpts: {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Accept': 'application/vnd.api+json'
+                    }
+                },
+                returninstance: true
+            });
+            $("<th><button onclick='showNewRecordModal($(this).parent().data())'>New</button></th>").appendTo(headerRow).data({
+                instance: instance,
+                fields: fields
+            });
+
         }
 
-        function showEditModal(record) {
-            const form = document.getElementById('editForm');
-            form.innerHTML = '';
+        
 
-            Object.entries(record.attributes).forEach(([key, value]) => {
-                form.innerHTML += `
+        function showNewRecordModal(data) {
+            
+            const form = $("#newRecordForm").empty().off("submit");
+
+            data.fields.forEach(field => {
+                form.append(`
                     <div class="form-group mb-3">
-                        <label class="form-label">${key}</label>
-                        <input type="text" class="form-control" id="edit_${key}" value="${value}">
+                        <label class="form-label">${field}</label>
+                        <input type="text" class="form-control" name="${field}" value="">
                     </div>
-                `;
+                `);
             });
-
-            form.innerHTML += `
-                <div class="d-flex justify-content-end gap-2">
-                    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="saveRecord('${record.id}')">Save</button>
-                </div>
-            `;
-
-            new bootstrap.Modal(document.getElementById('editModal')).show();
+            let instance = data.instance;
+            instance.getUtilities().captureFormSubmit(form,(data)=>{
+                instance.newItem(data).then(()=>{
+                    $("#newRecordModal").modal("hide");
+                });
+            })
+            $("#newRecordModal").modal("show");
         }
 
-        function closeModal() {
-            bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
-        }
-
-        function saveRecord(id) {
-            try {
-                const attributes = {};
-                const form = document.getElementById('editForm');
-                form.querySelectorAll('input[type="text"]').forEach(input => {
-                    const key = input.id.replace('edit_', '');
-                    attributes[key] = sanitizeInput(input.value);
-                });
-
-                $.ajax({
-                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}/${id}`,
-                    type: 'PUT',
-                    headers: {
-                        'Authorization': getAuthHeader(),
-                        'Content-Type': 'application/vnd.api+json'
-                    },
-                    data: JSON.stringify({
-                        data: {
-                            type: currentFile.replace('.csv', ''),
-                            id: id,
-                            attributes: attributes
-                        }
-                    }),
-                    success: function() {
-                        closeModal();
-                        loadFileContent(currentPage);
-                    },
-                    error: function(xhr) {
-                        alert('Error saving record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                    }
-                });
-            } catch (error) {
-                alert(error.message);
-            }
-        }
-
-        function saveNewRecord() {
-            try {
-                const form = document.getElementById('newRecordForm');
-                const attributes = {};
-                let isValid = true;
-
-                form.querySelectorAll('input[type="text"]').forEach(input => {
-                    const key = input.id.replace('new_', '');
-                    attributes[key] = sanitizeInput(input.value);
-                    if (!input.value) {
-                        isValid = false;
-                    }
-                });
-
-                if (!isValid) {
-                    alert('Please fill in all fields');
-                    return;
-                }
-
-                $.ajax({
-                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}`,
-                    type: 'POST',
-                    headers: {
-                        'Authorization': getAuthHeader(),
-                        'Content-Type': 'application/vnd.api+json'
-                    },
-                    data: JSON.stringify({
-                        data: {
-                            type: currentFile.replace('.csv', ''),
-                            attributes: attributes
-                        }
-                    }),
-                    success: function() {
-                        closeNewRecordModal();
-                        loadFileContent(currentPage);
-                    },
-                    error: function(xhr) {
-                        alert('Error creating record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                    }
-                });
-            } catch (error) {
-                alert(error.message);
-            }
-        }
-
-        function deleteRecord(id) {
-            if (!confirm('Are you sure you want to delete this record?')) {
-                return;
-            }
-
-            $.ajax({
-                url: `${API_URL}/api/csv/${currentFile}/${id}`,
-                type: 'DELETE',
-                headers: {
-                    'Authorization': getAuthHeader()
-                },
-                success: function() {
-                    loadFileContent(currentPage);
-                },
-                error: function(xhr) {
-                    alert('Error deleting record: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                }
+        function showEditModal(instance) {
+            const form = $("#newRecordForm").empty().off("submit");
+            Object.keys(instance.attributes).forEach(field => {
+                form.append(`
+                    <div class="form-group mb-3">
+                        <label class="form-label">${field}</label>
+                        <input type="text" class="form-control" name="${field}" value="${instance.attributes[field]}">
+                    </div>
+                `);
             });
+            instance.getUtilities().captureFormSubmit(form,(data)=>{
+                instance.update(data).then(()=>{
+                    $("#newRecordModal").modal("hide");
+                });
+            })
+            $("#newRecordModal").modal("show");
         }
+
 
         function deleteFile(filename) {
             if (!confirm('Are you sure you want to delete this file?')) {
@@ -620,49 +442,10 @@
             });
         }
 
-        function handleSearch(event) {
-            event.preventDefault();
-            try {
-                const searchField = sanitizeInput(document.getElementById('searchField').value);
-                const searchValue = sanitizeInput(document.getElementById('searchValue').value);
-                const exactMatch = document.getElementById('exactMatch').checked;
-
-                validateSearchInput(searchValue);
-
-                if (!searchValue) {
-                    loadFileContent(0);
-                    return;
-                }
-
-                $.ajax({
-                    url: `${API_URL}/api/csv/${sanitizeFilename(currentFile)}/search`,
-                    type: 'GET',
-                    headers: {
-                        'Authorization': getAuthHeader()
-                    },
-                    data: {
-                        [searchField]: searchValue,
-                        exact: exactMatch,
-                        'page[offset]': currentPage,
-                        'page[limit]': pageSize
-                    },
-                    success: function(response) {
-                        displayFileContent(response);
-                    },
-                    error: function(xhr) {
-                        alert('Error searching records: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                    }
-                });
-            } catch (error) {
-                alert(error.message);
-            }
-        }
-
-        function changePageSize(newSize) {
-            pageSize = parseInt(newSize);
-            currentPage = 0; // Reset to first page when changing page size
-            loadFileContent(0);
-        }
+        // Check for existing token on page load
+        $(document).ready(function() {
+            checkExistingToken();
+        });
     </script>
 </body>
 </html> 

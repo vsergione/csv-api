@@ -5,17 +5,18 @@ use PHPUnit\Framework\TestCase;
 class CsvApiTest extends TestCase
 {
     private string $dataDir =  __DIR__ . '/../data';
-    private string $baseUrl = 'http://localhost:8000/csv_api.php';
-    private $username = 'admin';
-    private $password = 'secret123';
-    private $testFile = 'test_products.csv';
-    private $testData = [
+    private string $baseUrl = 'http://localhost:8000/api.php';
+    private string $username = 'admin';
+    private string $password = 'secret123';
+    private string $testFile = 'test_products.csv';
+    private array $testData = [
         'id' => '1',
         'product_name' => 'Test Product',
         'price' => '99.99',
         'category' => 'Test',
         'stock' => '50'
     ];
+    private ?string $authToken = null;
 
     protected function setUp(): void
     {
@@ -34,6 +35,39 @@ class CsvApiTest extends TestCase
             fputcsv($file, $row);
         }
         fclose($file);
+        
+        // Login to get JWT token
+        $this->login();
+    }
+
+    private function login(): void
+    {
+        $ch = curl_init();
+        $url = $this->baseUrl . '/api/auth/login';
+
+        $headers = [
+            'Content-Type: application/json'
+        ];
+
+        $data = json_encode([
+            'username' => $this->username,
+            'password' => $this->password
+        ]);
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200) {
+            $responseData = json_decode($response, true);
+            $this->authToken = $responseData['data']['attributes']['token'];
+        }
     }
 
     protected function tearDown(): void
@@ -60,9 +94,11 @@ class CsvApiTest extends TestCase
         $url = $this->baseUrl . $endpoint;
         echo $url."\n";
 
-        $headers = [
-            'Authorization: Basic ' . base64_encode($this->username . ':' . $this->password)
-        ];
+        $headers = [];
+
+        if ($this->authToken) {
+            $headers[] = 'Authorization: Bearer ' . $this->authToken;
+        }
 
         if (!$isMultipart && $data !== null) {
             $headers[] = 'Content-Type: application/vnd.api+json';
