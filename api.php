@@ -1,15 +1,9 @@
 <?php
 
-// JWT Configuration
-define('JWT_SECRET', 'your-secret-key-change-this-in-production');   // TODO: change to a secure secret
-define('JWT_ALGORITHM', 'HS256');
-define('JWT_EXPIRY', 3600); // 1 hour
-define('DATA_DIR', __DIR__ . '/data');   // TODO: change to your data directory
+require "config.php";
 
-// User credentials (in production, use a database)
-$validUsers = [
-    'admin' => password_hash('secret123', PASSWORD_DEFAULT)
-];
+// Debug configuration
+define('CSV_DEBUG_ENABLED', true); // Set to false to disable CSV debug logging
 
 // JWT Helper Functions
 function base64url_encode($data) {
@@ -79,8 +73,8 @@ function sanitizeInput($input) {
     if (!is_string($input)) {
         return $input;
     }
-    // Remove HTML tags and encode special characters
-    return htmlspecialchars(strip_tags($input), ENT_QUOTES, 'UTF-8');
+    // Remove HTML tags but don't encode special characters
+    return strip_tags($input);
 }
 
 function sanitizeFilename($filename) {
@@ -177,35 +171,101 @@ class CsvHandler {
 
     private function loadData(): void {
         if (!file_exists($this->filePath)) {
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: File not found: {$this->filePath}");
+            }
             throw new RuntimeException("CSV file not found: {$this->filePath}");
+        }
+
+        if (CSV_DEBUG_ENABLED) {
+            error_log("CSV Debug: Opening file for reading: {$this->filePath}");
         }
 
         $file = fopen($this->filePath, 'r');
         if ($file === false) {
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: Failed to open file: {$this->filePath}");
+            }
             throw new RuntimeException("Could not open file: {$this->filePath}");
         }
 
         // Read headers
         $csvFile = fgetcsv($file);
         if(!$csvFile) {
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: No headers found in file: {$this->filePath}");
+            }
             fclose($file);
             throw new RuntimeException("Invalid CSV file: No headers found");
         }
         $this->headers = array_map('sanitizeInput', $csvFile);
         if ($this->headers === false) {
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: Failed to sanitize headers in file: {$this->filePath}");
+            }
             fclose($file);
             throw new RuntimeException("Invalid CSV file: No headers found");
         }
 
+        // Debug: Log headers
+        if (CSV_DEBUG_ENABLED) {
+            error_log("CSV Debug: Headers loaded for file {$this->filePath}: " . implode(', ', $this->headers));
+        }
+
         // Read data
         $this->data = [];
+        $lineNumber = 1; // Start at 1 since we already read the header
+        $validLines = 0;
+        
         while (($row = fgetcsv($file)) !== false) {
-            if (count($row) === count($this->headers)) {
-                $this->data[] = array_combine($this->headers, array_map('sanitizeInput', $row));
+            $lineNumber++;
+            
+            // Debug: Log each line being read
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: Reading line {$lineNumber} from {$this->filePath}: " . implode(', ', $row));
+            }
+            
+            // Handle column count mismatches by padding or truncating
+            if (count($row) !== count($this->headers)) {
+                if (CSV_DEBUG_ENABLED) {
+                    error_log("CSV Debug: Column count mismatch on line {$lineNumber}. Expected: " . count($this->headers) . ", Got: " . count($row));
+                }
+                
+                if (count($row) < count($this->headers)) {
+                    // Fill missing columns with null
+                    $missingColumns = count($this->headers) - count($row);
+                    $row = array_merge($row, array_fill(0, $missingColumns, null));
+                    
+                    if (CSV_DEBUG_ENABLED) {
+                        error_log("CSV Debug: Filled {$missingColumns} missing columns with null on line {$lineNumber}");
+                    }
+                } else {
+                    // Truncate extra columns
+                    $extraColumns = count($row) - count($this->headers);
+                    $row = array_slice($row, 0, count($this->headers));
+                    
+                    if (CSV_DEBUG_ENABLED) {
+                        error_log("CSV Debug: Truncated {$extraColumns} extra columns on line {$lineNumber}");
+                    }
+                }
+            }
+            
+            // Now the row should have the correct number of columns
+            $this->data[] = array_combine($this->headers, array_map('sanitizeInput', $row));
+            $validLines++;
+            
+            // Debug: Log successful line processing
+            if (CSV_DEBUG_ENABLED) {
+                error_log("CSV Debug: Successfully processed line {$lineNumber} - Record added");
             }
         }
 
         fclose($file);
+        
+        // Debug: Log summary
+        if (CSV_DEBUG_ENABLED) {
+            error_log("CSV Debug: File {$this->filePath} loaded successfully. Total lines read: {$lineNumber}, Valid records: {$validLines}");
+        }
     }
 
     private function saveData(): void {
@@ -233,7 +293,7 @@ class CsvHandler {
         ];
     }
 
-    public function getAll(int $offset = 0, int $perPage = 10): array {
+    public function getAll(int $offset = 0, int $perPage = 50): array {
         $resources = [];
         foreach ($this->data as $index => $row) {
             $resources[] = $this->formatResourceObject($row, $index);
@@ -254,6 +314,20 @@ class CsvHandler {
         ];
     }
 
+    public function getAllRecords(): array {
+        $resources = [];
+        foreach ($this->data as $index => $row) {
+            $resources[] = $this->formatResourceObject($row, $index);
+        }
+        
+        return [
+            'data' => $resources,
+            'meta' => [
+                'totalRecords' => count($resources)
+            ]
+        ];
+    }
+
     public function getById(int $id): ?array {
         if (!isset($this->data[$id])) {
             return null;
@@ -263,7 +337,7 @@ class CsvHandler {
         ];
     }
 
-    public function search(array $criteria, bool $exactMatch = false, int $offset = 0, int $perPage = 10): array {
+    public function search(array $criteria, bool $exactMatch = false, int $offset = 0, int $perPage = 50): array {
         // Sanitize search criteria
         $criteria = sanitizeInput($criteria);
         
@@ -339,14 +413,15 @@ class CsvHandler {
         // Sanitize input attributes
         $attributes = sanitizeInput($attributes);
 
-        // Validate that all required headers are present
-        foreach ($this->headers as $header) {
-            if (!isset($attributes[$header])) {
-                throw new InvalidArgumentException("Missing required field: {$header}");
+        // Validate that all provided attributes correspond to valid headers
+        foreach ($attributes as $key => $value) {
+            if (!in_array($key, $this->headers)) {
+                throw new InvalidArgumentException("Invalid field: {$key}");
             }
         }
 
-        $this->data[$id] = $attributes;
+        // Merge provided attributes with existing data (partial update)
+        $this->data[$id] = array_merge($this->data[$id], $attributes);
         $this->saveData();
         return true;
     }
@@ -371,6 +446,40 @@ class CsvHandler {
                 ]
             ]
         ];
+    }
+
+    public function debugLine(int $lineNumber): array {
+        if (!file_exists($this->filePath)) {
+            throw new RuntimeException("CSV file not found: {$this->filePath}");
+        }
+
+        $file = fopen($this->filePath, 'r');
+        if ($file === false) {
+            throw new RuntimeException("Could not open file: {$this->filePath}");
+        }
+
+        $currentLine = 0;
+        $targetLine = $lineNumber;
+        
+        while (($row = fgetcsv($file)) !== false) {
+            $currentLine++;
+            if ($currentLine === $targetLine) {
+                fclose($file);
+                return [
+                    'line_number' => $lineNumber,
+                    'raw_content' => $row,
+                    'column_count' => count($row),
+                    'expected_columns' => count($this->headers),
+                    'headers' => $this->headers,
+                    'is_valid' => count($row) === count($this->headers),
+                    'missing_columns' => count($row) < count($this->headers) ? array_slice($this->headers, count($row)) : [],
+                    'extra_columns' => count($row) > count($this->headers) ? array_slice($row, count($this->headers)) : []
+                ];
+            }
+        }
+
+        fclose($file);
+        throw new RuntimeException("Line {$lineNumber} not found in file");
     }
 }
 
@@ -443,6 +552,36 @@ if (count($parts) >= 3 && $parts[0] === 'api' && $parts[1] === 'auth') {
             ]
         ]
     ]));
+}
+
+// Handle download endpoints
+if (count($parts) >= 4 && $parts[0] === 'api' && $parts[1] === 'csv' && $parts[3] === 'download') {
+    $filename = $parts[2];
+    $filePath = DATA_DIR . '/' . $filename;
+    
+    if (!file_exists($filePath)) {
+        http_response_code(404);
+        die(json_encode([
+            'errors' => [
+                [
+                    'status' => '404',
+                    'title' => 'Not Found',
+                    'detail' => 'The requested file was not found'
+                ]
+            ]
+        ]));
+    }
+    
+    // Set headers for file download
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Length: ' . filesize($filePath));
+    header('Cache-Control: no-cache, must-revalidate');
+    header('Expires: Sat, 26 Jul 1997 05:00:00 GMT');
+    
+    // Output the file content
+    readfile($filePath);
+    exit;
 }
 
 // Validate path structure for CSV endpoints
@@ -645,6 +784,33 @@ try {
         case 'GET':
             if (isset($parts[3]) && $parts[3] === 'structure') {
                 die(json_encode($csvHandler->getHeaders()));
+            } else if (isset($parts[3]) && $parts[3] === 'all') {
+                // Get all records without pagination
+                die(json_encode($csvHandler->getAllRecords()));
+            } else if (isset($parts[3]) && $parts[3] === 'debug' && isset($parts[4])) {
+                // Debug specific line
+                $lineNumber = (int)$parts[4];
+                try {
+                    $debugInfo = $csvHandler->debugLine($lineNumber);
+                    die(json_encode([
+                        'data' => [
+                            'type' => 'debug_info',
+                            'id' => 'line_' . $lineNumber,
+                            'attributes' => $debugInfo
+                        ]
+                    ]));
+                } catch (Exception $e) {
+                    http_response_code(400);
+                    die(json_encode([
+                        'errors' => [
+                            [
+                                'status' => '400',
+                                'title' => 'Bad Request',
+                                'detail' => $e->getMessage()
+                            ]
+                        ]
+                    ]));
+                }
             } else if (isset($parts[3]) && $parts[3] === 'search') {
                 
             } else if (isset($parts[3])) {
@@ -670,7 +836,7 @@ try {
             } else {
                 parse_str($query, $params);
                 $offset = isset($params['page'][$filename]['offset']) ? (int)(sanitizeInput($params['page'][$filename]['offset'])) : 0;
-                $perPage = isset($params['page'][$filename]['limit']) ? (int)(sanitizeInput($params['page'][$filename]['limit'])) : 10;
+                $perPage = isset($params['page'][$filename]['limit']) ? (int)(sanitizeInput($params['page'][$filename]['limit'])) : 50;
                 $exactMatch = false;
                 if(isset($params['filter'])) {
                     // Handle search request
@@ -778,14 +944,11 @@ try {
                     exit;
                 }
 
+                // Get the updated record to return complete data
+                $updatedRecord = $csvHandler->getById($id);
+                
                 http_response_code(200);
-                die(json_encode([
-                    'data' => [
-                        'type' => pathinfo($filename, PATHINFO_FILENAME),
-                        'id' => (string)$id,
-                        'attributes' => $input['data']['attributes']
-                    ]
-                ]));
+                die(json_encode($updatedRecord));
             } catch (InvalidArgumentException $e) {
                 http_response_code(400);
                 die(json_encode([

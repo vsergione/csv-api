@@ -10,6 +10,7 @@
     <!-- <script src="https://cdn.jsdelivr.net/gh/softaccel/apiator.js@main/apiator.js"></script> -->
     <script src="apiator.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body {
             min-height: 100vh;
@@ -68,6 +69,23 @@
             margin-top: 0.5rem;
         }
     </style>
+    <style>
+        #filesNavigator {
+            display: none;
+        }
+        .logged-in #filesNavigator {
+            display: block;
+        }
+        .logged-in .auth-form >div{
+            display: none;
+        }
+        .file-item .btn-group{
+            display: none;
+        }
+        .file-item:hover .btn-group{
+            display: block;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -82,24 +100,28 @@
                 <label for="password" class="form-label">Password</label>
                 <input type="password" class="form-control" id="password" placeholder="Password" value="secret123">
             </div>
-            <button class="btn btn-primary w-100" onclick="authenticate()">Login</button>
+            <div class="mb-3">
+                <button class="btn btn-primary w-100" onclick="authenticate()">Login</button>
+            </div>
+            <button class="btn btn-outline-secondary w-100" onclick="logout()">Logout</button>
         </div>
 
-        <div id="mainContent" class="hidden">
+        <div id="filesNavigator" class="hidden">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div class="input-group" style="max-width: 400px;">
                     <input type="file" class="form-control" id="fileInput" accept=".csv">
                     <button class="btn btn-primary" onclick="uploadFile()">Upload</button>
                 </div>
-                <button class="btn btn-outline-secondary" onclick="logout()">Logout</button>
             </div>
-
             <h5 class="mb-3">Files</h5>
             <div class="file-list" id="fileList">
                 <div class="file-item p-2 border-bottom ${currentFile === '<%= id %>' ? 'active' : ''}" onclick="viewFile('<%= id %>')">
                     <div class="d-flex justify-content-between align-items-center">
                         <span><%= attributes.filename %></span>
-                        <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteFile('<%= id %>')">Delete</button>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); downloadFile('<%= id %>')"><i class="fa-solid fa-download"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteFile('<%= id %>')"><i class="fa-solid fa-trash"></i></button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -121,7 +143,7 @@
                     <tbody data-filter="#filterForm" data-paging="#recordsPaging" data-pagesizeinp="#recordsPagesizeInp" data-totalrecscount="#recordsTotalEntries" data-type="${filename}"><tr></tr></tbody>
                 </table>
                 <div class="">
-                    <div class="btn-group" id="recordsPaging" data-pagesize="10">
+                    <div class="btn-group" id="recordsPaging" data-pagesize="50">
                         <button name="first" class="btn btn-outline-secondary" title="0">&lt;&lt;</button>
                         <button name="prev" class="btn btn-outline-secondary" title="-20">&lt;</button>
                         <button name="page" class="btn btn-outline-secondary" title="0">1</button>
@@ -129,12 +151,13 @@
                         <button name="last" class="btn btn-outline-secondary" title="140">&gt;&gt;</button>
                     </div>
                     <select id="recordsPagesizeInp">
-                        <option selected>10</option>
-                        <option >20</option>
-                        <option >30</option>
-                        <option >40</option>
-                        <option>50</option>
+                        <option selected>50</option>
+                        <option>10</option>
+                        <option>20</option>
+                        <option>30</option>
+                        <option>40</option>
                         <option>75</option>
+                        <option>100</option>
                     </select> inregistrari pe pagina din <span style="font-size: 1rem" id="recordsTotalEntries"></span> inregistrari
                 </div>
             </div>
@@ -179,7 +202,7 @@
         const API_URL = 'api.php';
         let currentFile = null;
         let currentPage = 0;
-        let pageSize = 10;
+        let pageSize = 50;
         let authToken = null;
 
         // Input sanitization functions
@@ -235,8 +258,7 @@
                     authToken = response.data.attributes.token;
                     // Store token in localStorage for persistence
                     localStorage.setItem('authToken', authToken);
-                    document.getElementById('mainContent').classList.remove('hidden');
-                    document.querySelector('.auth-form').classList.add('collapsed');
+                    document.querySelector('.sidebar').classList.add('logged-in');
                     listFiles();
                 },
                 error: function(xhr) {
@@ -254,8 +276,7 @@
             const storedToken = localStorage.getItem('authToken');
             if (storedToken) {
                 authToken = storedToken;
-                document.getElementById('mainContent').classList.remove('hidden');
-                document.querySelector('.auth-form').classList.add('collapsed');
+                document.querySelector('.sidebar').classList.add('logged-in');
                 listFiles();
             }
         }
@@ -263,8 +284,7 @@
         function logout() {
             authToken = null;
             localStorage.removeItem('authToken');
-            document.getElementById('mainContent').classList.add('hidden');
-            document.querySelector('.auth-form').classList.remove('collapsed');
+            document.querySelector('.sidebar').classList.remove('logged-in');
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
             $('#fileContent').empty();
@@ -275,7 +295,7 @@
             $("#fileList").apiator({
                 url: `${API_URL}/api/csv`,
                 ajaxOpts: {
-                    headers: {
+                headers: {
                         'Authorization': `Bearer ${authToken}`,
                         'Accept': 'application/vnd.api+json'
                     }
@@ -341,6 +361,11 @@
                             item.classList.add('active');
                         }
                     });
+                },
+                error: function(xhr) {
+                    alert('Error loading file content: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
+                    $('#fileContent').empty();
+                    currentFile = null;
                 }
             });
         }
@@ -439,6 +464,43 @@
                 error: function(xhr) {
                     alert('Error deleting file: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
                 }
+            });
+        }
+
+        function downloadFile(filename) {
+            // Create a temporary link element to trigger the download
+            const link = document.createElement('a');
+            link.href = `${API_URL}/api/csv/${sanitizeFilename(filename)}/download`;
+            link.download = filename;
+            
+            // Add authorization header by creating a fetch request
+            fetch(`${API_URL}/api/csv/${sanitizeFilename(filename)}/download`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': getAuthHeader()
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Download failed');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Create a URL for the blob
+                const url = window.URL.createObjectURL(blob);
+                link.href = url;
+                
+                // Trigger the download
+                document.body.appendChild(link);
+                link.click();
+                
+                // Clean up
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => {
+                alert('Error downloading file: ' + error.message);
             });
         }
 

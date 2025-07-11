@@ -160,6 +160,56 @@ class CsvApiTest extends TestCase
         $this->assertEquals(204, $response['code']);
     }
 
+    public function testDownloadFile()
+    {
+        echo "\nRunning test: Download File";
+        $ch = curl_init();
+        $url = $this->baseUrl . '/api/csv/test.csv/download';
+
+        $headers = [];
+        if ($this->authToken) {
+            $headers[] = 'Authorization: Bearer ' . $this->authToken;
+        }
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $this->assertEquals(200, $httpCode);
+        
+        // Verify the response contains CSV content
+        $this->assertStringContainsString('id,name,email', $response);
+        $this->assertStringContainsString('1,John Doe,john@example.com', $response);
+    }
+
+    public function testDownloadNonExistentFile()
+    {
+        echo "\nRunning test: Download Non-existent File";
+        $ch = curl_init();
+        $url = $this->baseUrl . '/api/csv/nonexistent.csv/download';
+
+        $headers = [];
+        if ($this->authToken) {
+            $headers[] = 'Authorization: Bearer ' . $this->authToken;
+        }
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $this->assertEquals(404, $httpCode);
+        $responseData = json_decode($response, true);
+        $this->assertEquals('The requested file was not found', $responseData['errors'][0]['detail']);
+    }
+
     public function testGetAllRecords()
     {
         echo "\nRunning test: Get All Records";
@@ -276,9 +326,60 @@ class CsvApiTest extends TestCase
             ]
         ];
         
-        $response = $this->makeRequest('PUT', '/api/csv/test.csv/0', $data);
+        $response = $this->makeRequest('PATCH', '/api/csv/test.csv/0', $data);
         $this->assertEquals(200, $response['code']);
         $this->assertArrayHasKey('data', $response['body']);
+        $this->assertEquals('John Updated', $response['body']['data']['attributes']['name']);
+        $this->assertEquals('john.updated@example.com', $response['body']['data']['attributes']['email']);
+    }
+
+    public function testPartialUpdateRecord()
+    {
+        echo "\nRunning test: Partial Update Record";
+        // First, ensure we have a record to update
+        $createData = [
+            'data' => [
+                'attributes' => [
+                    'id' => '3',
+                    'name' => 'Bob Wilson',
+                    'email' => 'bob@example.com'
+                ]
+            ]
+        ];
+        
+        $this->makeRequest('POST', '/api/csv/test.csv', $createData);
+        
+        // Now test partial update - only update the name
+        $partialData = [
+            'data' => [
+                'attributes' => [
+                    'name' => 'Bob Updated'
+                ]
+            ]
+        ];
+        
+        $response = $this->makeRequest('PATCH', '/api/csv/test.csv/2', $partialData);
+        $this->assertEquals(200, $response['code']);
+        $this->assertArrayHasKey('data', $response['body']);
+        $this->assertEquals('Bob Updated', $response['body']['data']['attributes']['name']);
+        $this->assertEquals('bob@example.com', $response['body']['data']['attributes']['email']); // Should remain unchanged
+        $this->assertEquals('3', $response['body']['data']['attributes']['id']); // Should remain unchanged
+    }
+
+    public function testPartialUpdateWithInvalidField()
+    {
+        echo "\nRunning test: Partial Update With Invalid Field";
+        $invalidData = [
+            'data' => [
+                'attributes' => [
+                    'invalid_field' => 'This field does not exist'
+                ]
+            ]
+        ];
+        
+        $response = $this->makeRequest('PATCH', '/api/csv/test.csv/0', $invalidData);
+        $this->assertEquals(400, $response['code']);
+        $this->assertEquals('Invalid field: invalid_field', $response['body']['errors'][0]['detail']);
     }
 
     public function testDeleteRecord()

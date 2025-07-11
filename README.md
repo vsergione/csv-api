@@ -183,6 +183,17 @@ DELETE /api/csv/{filename}
 Authorization: Bearer <token>
 ```
 
+#### Download File
+
+```http
+GET /api/csv/{filename}/download
+Authorization: Bearer <token>
+```
+
+This endpoint will download the CSV file directly. The file will be served with appropriate headers for download.
+
+**Note:** This endpoint returns the raw CSV file content, not JSON. The browser will automatically download the file.
+
 ### Record Operations
 
 #### Get All Records
@@ -252,20 +263,36 @@ Content-Type: application/vnd.api+json
 #### Update Record
 
 ```http
-PUT /api/csv/{filename}/{id}
+PATCH /api/csv/{filename}/{id}
 Authorization: Bearer <token>
 Content-Type: application/vnd.api+json
 
 {
     "data": {
         "attributes": {
-            "id": "1",
-            "name": "John Updated",
-            "email": "john.updated@example.com"
+            "name": "John Updated"
         }
     }
 }
 ```
+
+Response:
+
+```json
+{
+    "data": {
+        "type": "example",
+        "id": "0",
+        "attributes": {
+            "id": "1",
+            "name": "John Updated",
+            "email": "john@example.com"
+        }
+    }
+}
+```
+
+**Note:** The PATCH method supports partial updates. You only need to include the fields you want to update. The response will contain the complete updated record.
 
 #### Delete Record
 

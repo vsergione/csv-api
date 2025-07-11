@@ -1098,8 +1098,7 @@ apiatorDebug = false;
                     }
                     return;
                 }
-                this.attributes[attrName] = updateData[attrName];
-                return;
+
                 // update only if different from prev value
                 if(updateData[attrName]!==this.shadow.attributes[attrName]) {
                     // console.log("Attr '"+attrName+"'  update value '"+updateData[attrName]+"' differs in value than current value '"+this.attributes[attrName]+"' => add to update");
