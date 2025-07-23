@@ -425,8 +425,13 @@
                     'Accept': 'application/vnd.api+json'
                 },
                 success: function(response) {
-                    fields = response.data.attributes.headers;
-                    loadFileContent(filename,fields);
+                    var fields = response.data.attributes.headers;
+                    let instance = loadFileContent(filename,fields);
+                    $("#newRecordForm").data({
+                        "fields":fields,
+                        "instance":instance
+                    });
+
                     document.querySelectorAll('.file-item').forEach(item => {
                         item.classList.remove('active');
                         if (item.getAttribute('onclick').includes(filename)) {
@@ -470,14 +475,16 @@
                 instance: instance,
                 fields: fields
             });
+            return instance;
 
         }
 
         
 
-        function showNewRecordModal(data) {
+        function showNewRecordModal() {
             
             const form = $("#newRecordForm").empty().off("submit");
+            let data = form.data();
 
             data.fields.forEach(field => {
                 form.append(`
