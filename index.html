@@ -6,29 +6,30 @@
     <title>CSV File Manager</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.13.1/underscore-min.js"></script>
-    <!-- <script src="https://cdn.jsdelivr.net/gh/softaccel/apiator.js@main/apiator.js"></script> -->
     <script src="apiator.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body {
-            min-height: 100vh;
-            display: flex;
+
+            margin: 0;
+            padding: 0;
+            
         }
         .sidebar {
             width: 300px;
+            position: fixed;
+            left: 0;
+            top: 0;
+            height: 100%;
             background-color: #f8f9fa;
             border-right: 1px solid #dee2e6;
             padding: 1rem;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
         }
-        .main-content {
-            flex: 1;
-            padding: 1rem;
-            background-color: #fff;
-        }
+       
         .file-item {
             transition: background-color 0.2s;
             cursor: pointer;
@@ -46,16 +47,6 @@
         .form-group {
             margin-bottom: 1rem;
         }
-        @media (max-width: 768px) {
-            body {
-                flex-direction: column;
-            }
-            .sidebar {
-                width: 100%;
-                border-right: none;
-                border-bottom: 1px solid #dee2e6;
-            }
-        }
         .search-form {
             margin-bottom: 1rem;
             padding: 1rem;
@@ -68,21 +59,34 @@
         .search-form .form-check {
             margin-top: 0.5rem;
         }
-        .config-button {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
+        #mainContent{
+            margin-left: 300px; height: 100vh; background-color: #ffffff; color:black; display: flex; flex-direction: column;
+
         }
     </style>
     <style>
+  
+        .list-group-item{
+            cursor: pointer;
+        }
+        .list-group-item:hover{
+            background-color: #e9ecef;
+        }
+        .list-group-item.active{
+            background-color: #e9ecef;
+        }
+        .pagination-container{
+            padding: 1rem;
+            background-color: #e7e7e7;  
+            border-top: 1px solid #000000;
+        }
         #filesNavigator {
             display: none;
         }
         .logged-in #filesNavigator {
             display: block;
         }
-        .logged-in .auth-form >div{
+        .logged-in .auth-form{
             display: none;
         }
         .file-item .btn-group{
@@ -91,97 +95,110 @@
         .file-item:hover .btn-group{
             display: block;
         }
+        #logoutButton{
+            display: none;
+        }
+        .logged-in #logoutButton{
+            display: block;
+        }
     </style>
 </head>
 <body>
     <!-- Configuration Button -->
-    <button class="btn btn-outline-secondary btn-sm config-button" onclick="showConfigModal()" title="Configure API URL">
-        <i class="fa-solid fa-cog"></i>
-    </button>
-
     <div class="sidebar">
-        <h4 class="mb-4">CSV File Manager</h4>
+        <div class="sidebar-header d-flex p-2">
+            <h4 class="flex-grow-1 p-0 m-0">CSV File Manager</h4>
+            <button class="btn btn-outline-secondary btn-sm" onclick="showConfigModal()" title="Configure API URL">
+                <i class="fa-solid fa-cog"></i>
+            </button>
+        </div>
         
-        <div class="auth-form mb-4">
-            <div class="mb-3">
-                <label for="username" class="form-label">Username</label>
-                <input type="text" class="form-control" id="username" placeholder="Username">
-            </div>
-            <div class="mb-3">
-                <label for="password" class="form-label">Password</label>
-                <input type="password" class="form-control" id="password" placeholder="Password" value="secret123">
-            </div>
-            <div class="mb-3">
-                <button class="btn btn-primary w-100" onclick="authenticate()">Login</button>
-            </div>
+        <div class="auth-form mb-4" id="authForm">
+            <form  onsubmit="event.preventDefault(); authenticate()">
+                <div class="mb-3">
+                    <label for="username" class="form-label">Username</label>
+                    <input type="text" class="form-control" id="username" placeholder="Username">
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="password" placeholder="Password" value="secret123">
+                </div>
+                <div class="mb-3">
+                    <button class="btn btn-primary w-100"  type="submit">Login</button>
+                </div>
+            </form>
+        </div>
+        <div class="mb-3" id="logoutButton">
             <button class="btn btn-outline-secondary w-100" onclick="logout()">Logout</button>
         </div>
 
         <div id="filesNavigator" class="hidden">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <div class="input-group" style="max-width: 400px;">
-                    <input type="file" class="form-control" id="fileInput" accept=".csv">
-                    <button class="btn btn-primary" onclick="uploadFile()">Upload</button>
-                </div>
-            </div>
+            
             <h5 class="mb-3">Files</h5>
-            <div class="file-list" id="fileList">
-                <div class="file-item p-2 border-bottom ${currentFile === '<%= id %>' ? 'active' : ''}" onclick="viewFile('<%= id %>')">
+            <ul class="list-group" id="fileList">
+                <li class="list-group-item p-2 border-bottom ${currentFile === '<%= id %>' ? 'active' : ''}" onclick="viewFile('<%= id %>')" title="<%= attributes.filename %>">
                     <div class="d-flex justify-content-between align-items-center">
-                        <span><%= attributes.filename %></span>
+                        <div class="flex-grow-1 overflow-hidden text-truncate">
+                            <span class="text-truncate"><%= attributes.filename %></span>
+                        </div>
                         <div class="btn-group">
                             <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); downloadFile('<%= id %>')"><i class="fa-solid fa-download"></i></button>
                         <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteFile('<%= id %>')"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </div>
+                </li>
+            </ul>
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="input-group" style="max-width: 400px;">
+                    <input type="file" class="form-control" id="fileInput" accept=".csv">
+                    <button class="btn btn-primary" onclick="uploadFile()">Upload</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="main-content">
-        <div id="fileContent">
-        </div>
-        <template id="fileContentTemplate">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h4>${filename}</h4>
-                <button class="btn btn-primary" onclick="showNewRecordModal()">New Record</button>
-            </div>
-            <div class="table-responsive">
-                <form id="filterForm" class="d-none"><button type="submit" class="btn btn-primary" id="filterButton"></button></form>
-                <table class="table table-striped table-hover">
-                    <thead><tr></tr></thead>
-                    <tbody data-filter="#filterForm" data-paging="#recordsPaging" data-pagesizeinp="#recordsPagesizeInp" data-totalrecscount="#recordsTotalEntries" data-type="${filename}"><tr></tr></tbody>
-                </table>
-                <div class="">
-                    <div class="btn-group" id="recordsPaging" data-pagesize="50">
-                        <button name="first" class="btn btn-outline-secondary" title="0">&lt;&lt;</button>
-                        <button name="prev" class="btn btn-outline-secondary" title="-20">&lt;</button>
-                        <button name="page" class="btn btn-outline-secondary" title="0">1</button>
-                        <button name="next" class="btn btn-outline-secondary" title="20">&gt;</button>
-                        <button name="last" class="btn btn-outline-secondary" title="140">&gt;&gt;</button>
-                    </div>
-                    <select id="recordsPagesizeInp">
-                        <option selected>50</option>
-                        <option>10</option>
-                        <option>20</option>
-                        <option>30</option>
-                        <option>40</option>
-                        <option>75</option>
-                        <option>100</option>
-                    </select> inregistrari pe pagina din <span style="font-size: 1rem" id="recordsTotalEntries"></span> inregistrari
-                </div>
-            </div>
-        </template>
+    <div class="main-content" id="mainContent">
     </div>
+    <template id="fileContentTemplate">
+        <div class="d-flex justify-content-between align-items-center bg-dark text-white p-2">
+            <h4 class="p-0 m-0">${filename}</h4>
+            <button class="btn btn-primary" onclick="showNewRecordModal()">New Record</button>
+        </div>
+        <form id="filterForm" class="d-none"><button type="submit" class="btn btn-primary" id="filterButton"></button></form>
+        <div style="flex-grow: 1; width: 100%; height: 100%; overflow: scroll;">
+            <table class="table table-striped table-hover" style="width: 100%;">
+                <thead><tr></tr></thead>
+                <tbody data-filter="#filterForm" data-paging="#recordsPaging" data-pagesizeinp="#recordsPagesizeInp" data-totalrecscount="#recordsTotalEntries" data-type="${filename}">
+                    <tr ondblclick='showEditModal($(this).data().instance)'></tr></tbody>
+            </table>
+        </div>
+        <div class="pagination-container">
+            <div class="btn-group" id="recordsPaging" data-pagesize="50">
+                <button name="first" class="btn btn-outline-secondary" title="0">&lt;&lt;</button>
+                <button name="prev" class="btn btn-outline-secondary" title="-20">&lt;</button>
+                <button name="page" class="btn btn-outline-secondary" title="0">1</button>
+                <button name="next" class="btn btn-outline-secondary" title="20">&gt;</button>
+                <button name="last" class="btn btn-outline-secondary" title="140">&gt;&gt;</button>
+            </div>
+            <select id="recordsPagesizeInp">
+                <option selected>50</option>
+                <option>10</option>
+                <option>20</option>
+                <option>30</option>
+                <option>40</option>
+                <option>75</option>
+                <option>100</option>
+            </select> inregistrari pe pagina din <span style="font-size: 1rem" id="recordsTotalEntries"></span> inregistrari
+        </div>
+    </template>
 
     <!-- Configuration Modal -->
     <div class="modal fade" id="configModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">API Configuration</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <div class="form-group mb-3">
@@ -200,11 +217,11 @@
 
     <!-- Edit Modal -->
     <div class="modal fade" id="editModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Edit Record</h5>
-                    <button type="button" class="btn-close" onclick="closeModal()"></button>
+                    <button type="button" class="btn-close" onclick="closeModal()"  data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <div id="editForm"></div>
@@ -215,11 +232,11 @@
 
     <!-- New Record Modal -->
     <div class="modal fade" id="newRecordModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">New Record</h5>
-                    <button type="button" class="btn-close" onclick="closeNewRecordModal()"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <form id="newRecordForm"></form>
@@ -309,6 +326,52 @@
             return '';
         }
 
+        /**
+         * Decodes a JWT token without validation.
+         * Returns the decoded payload as a JavaScript object.
+         * 
+         * @param {string} token - The JWT token string (format: header.payload.signature)
+         * @returns {Object|null} The decoded payload as an object, or null if decoding fails
+         * 
+         * @example
+         * const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTY0MDAwMDAwMCwiZXhwIjoxNjQwMDAzNjAwfQ.signature";
+         * const payload = decodeJWT(token);
+         * console.log(payload.sub); // "admin"
+         */
+        function decodeJWT(token) {
+            if (!token || typeof token !== 'string') {
+                return null;
+            }
+
+            // Split the token into its three parts
+            const parts = token.split('.');
+            
+            if (parts.length !== 3) {
+                return null;
+            }
+
+            try {
+                // The payload is the second part (index 1)
+                const encodedPayload = parts[1];
+                
+                // Decode base64url
+                // Base64URL uses '-' and '_' instead of '+' and '/', and omits padding
+                let base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+                
+                // Add padding if needed
+                const paddingNeeded = (4 - (base64.length % 4)) % 4;
+                base64 += '='.repeat(paddingNeeded);
+                
+                // Decode base64 and parse JSON
+                const decodedPayload = JSON.parse(atob(base64));
+                
+                return decodedPayload;
+            } catch (error) {
+                console.error('Error decoding JWT:', error);
+                return null;
+            }
+        }
+
         function authenticate() {
             const username = sanitizeInput(document.getElementById('username').value);
             const password = sanitizeInput(document.getElementById('password').value);
@@ -346,7 +409,16 @@
         // Check for existing token on page load
         function checkExistingToken() {
             const storedToken = localStorage.getItem('authToken');
+            
             if (storedToken) {
+                let payload = decodeJWT(storedToken);
+                
+                // token expired
+                if (payload.exp < Date.now() / 1000) {
+                    logout();
+                    return;
+                }
+
                 authToken = storedToken;
                 document.querySelector('.sidebar').classList.add('logged-in');
                 listFiles();
@@ -359,7 +431,7 @@
             document.querySelector('.sidebar').classList.remove('logged-in');
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
-            $('#fileContent').empty();
+            $('#mainContent').empty();
             currentFile = null;
         }
 
@@ -374,7 +446,7 @@
                 },
                 on: {
                     load: function(collection) {
-                        console.log("Files loaded:", collection);
+                      //  console.log("Files loaded:", collection);
                     }
                 }
             });
@@ -441,7 +513,7 @@
                 },
                 error: function(xhr) {
                     alert('Error loading file content: ' + xhr.responseJSON?.errors?.[0]?.detail || 'Unknown error');
-                    $('#fileContent').empty();
+                    $('#mainContent').empty();
                     currentFile = null;
                 }
             });
@@ -454,13 +526,13 @@
             let tbodyRow = html.find('tbody>tr');
             fields.forEach((field,index) => {
                 $(`<th>${field}<div class="form-group"><input type="text" class="form-control" name="${field}" data-operator="=" form="filterForm" onkeyup="this.form.filterButton.click()"></div></th>`).appendTo(headerRow);
-                $(`<td><%=attributes.${field}%></td>`).appendTo(tbodyRow);
+                $(`<td><%=attributes['${field}']%></td>`).appendTo(tbodyRow);
             });
             $(`<td>
-                    <button onclick='showEditModal($(this).data().instance)'>Edit</button>
-                    <button onclick="if(confirm('Really delete?')){ $(this).data().instance.delete() }">Delete</button>
+                    <button onclick='showEditModal($(this).data().instance)' class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pencil"></i></button>
+                    <button onclick="if(confirm('Really delete?')){ $(this).data().instance.delete() }" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-trash"></i></button>
                 </td>`).appendTo(tbodyRow);
-            $("#fileContent").html(html);
+            $("#mainContent").html(html);
             let instance = tbodyRow.parent().apiator({
                 url: `${API_URL}/api/csv/${filename}`,
                 ajaxOpts: {
@@ -471,7 +543,7 @@
                 },
                 returninstance: true
             });
-            $("<th><button onclick='showNewRecordModal($(this).parent().data())'>New</button></th>").appendTo(headerRow).data({
+            $(`<th><button onclick='showNewRecordModal($(this).parent().data())' class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus"></i></button></th>`).appendTo(headerRow).data({
                 instance: instance,
                 fields: fields
             });
@@ -536,7 +608,7 @@
                 success: function() {
                     listFiles();
                     if (currentFile === filename) {
-                        $('#fileContent').empty();
+                        $('#mainContent').empty();
                         currentFile = null;
                     }
                 },

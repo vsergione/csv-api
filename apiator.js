@@ -1,95 +1,95 @@
 apiatorDebug = false;
 (function ($) {
-     /**
+    /**
      * 
      * @param opts
      * @returns {$|void}
      */
-     $.fn.apiator = function (opts)
-     {
-         if(!this.length) {
-             if(apiatorDebug) console.log("Warning: no DOM element bound with apiator",this);
-         }
- 
-         if(typeof opts==="string") {
-             opts = {
-                 url: opts,
-             }
-         }
- 
-         // extract data attributes from html element and assign them to
-         let options = Object.assign({dataBindings: {},addontop:false}, this.data());
- 
-         // assign options passed as
-         try {
-             Object.assign(options, parseOptions(opts));
-         }
-         catch (e) {
-             throw ["Error on Apiator init",e];
-         }
- 
- 
- 
-         if (this.data("instance") !== undefined) {
-             let instance = this.data("instance");
- 
-             if(options.url) {
-                 instance.setUrl(options.url);
-                 delete options.url;
-             }
- 
-             Object.assign(instance,parseOptions(options));
- 
-             return options.returninstance ? instance : this;
-         }
- 
-         if(apiatorDebug) console.log("init apiator on ",this,options);
- 
-         if(options.hasOwnProperty("emptyview")) {
-             options.emptyview = $(options.emptyview).remove();
-         }
- 
-         // resource type unknown
-         if (!options.hasOwnProperty("resourcetype")) {
-             options.resourcetype = "collection";
-             if(apiatorDebug) console.log("WARNING: no resourcetype specified. Assumed it's a collection");
-         }
-         let listeners = options.on;
-         delete options.on;
+    $.fn.apiator = function (opts)
+    {
+        if(!this.length) {
+            if(apiatorDebug) console.log("Warning: no DOM element bound with apiator",this);
+        }
 
-         console.log("options",options);
- 
- 
-         let instance;
-         switch ( options.resourcetype) {
-             case "collection":
-                 instance = createCollectionInstance.bind(this)(this,options);
-                 break;
-             case "item":
-                 instance = createItemInstance.bind(this)(this,options);
-                 break;
-             default:
-                 throw new Error("Invalid resource type for APIATOR.JS (should be item or collection)." +
-                     " Please define a valid resource on element "+this.attr("id"));
-         }
- 
-         if(listeners) {
-             Object.getOwnPropertyNames(listeners).forEach((eventName)=>{
-                 instance.on(eventName,listeners[eventName]);
-             });
-         }
- 
- 
-         this.data("instance",instance);
- 
-         console.log("instance",instance.url);
- 
-         if(instance.url && (typeof instance.dontload==="undefined" || !instance.dontload)) {
-             instance.loadFromRemote()
-         }
- 
-         return (options.hasOwnProperty("returninstance") && opts.returninstance) ? instance : this;
-     };
+        if(typeof opts==="string") {
+            opts = {
+                url: opts,
+            }
+        }
+
+        // extract data attributes from html element and assign them to
+        let options = Object.assign({dataBindings: {},addontop:false}, this.data());
+
+        // assign options passed as
+        try {
+            Object.assign(options, parseOptions(opts));
+        }
+        catch (e) {
+            throw ["Error on Apiator init",e];
+        }
+
+
+
+        if (this.data("instance") !== undefined) {
+            let instance = this.data("instance");
+
+            if(options.url) {
+                instance.setUrl(options.url);
+                delete options.url;
+            }
+
+            Object.assign(instance,parseOptions(options));
+
+            return options.returninstance ? instance : this;
+        }
+
+        if(apiatorDebug) console.log("init apiator on ",this,options);
+
+        if(options.hasOwnProperty("emptyview")) {
+            options.emptyview = $(options.emptyview).remove();
+        }
+
+        // resource type unknown
+        if (!options.hasOwnProperty("resourcetype")) {
+            options.resourcetype = "collection";
+            if(apiatorDebug) console.log("WARNING: no resourcetype specified. Assumed it's a collection");
+        }
+        let listeners = options.on;
+        delete options.on;
+
+        console.log("options",options);
+
+
+        let instance;
+        switch ( options.resourcetype) {
+            case "collection":
+                instance = createCollectionInstance.bind(this)(this,options);
+                break;
+            case "item":
+                instance = createItemInstance.bind(this)(this,options);
+                break;
+            default:
+                throw new Error("Invalid resource type for APIATOR.JS (should be item or collection)." +
+                    " Please define a valid resource on element "+this.attr("id"));
+        }
+
+        if(listeners) {
+            Object.getOwnPropertyNames(listeners).forEach((eventName)=>{
+                instance.on(eventName,listeners[eventName]);
+            });
+        }
+
+
+        this.data("instance",instance);
+
+        console.log("instance",instance.url);
+
+        if(instance.url && (typeof instance.dontload==="undefined" || !instance.dontload)) {
+            instance.loadFromRemote()
+        }
+
+        return (options.hasOwnProperty("returninstance") && opts.returninstance) ? instance : this;
+    };
 
 
     $.fn.apiator.templateSettings = {
@@ -102,14 +102,14 @@ apiatorDebug = false;
         if (obj instanceof _$1) return obj;
         if (!(this instanceof _$1)) return new _$1(obj);
         this._wrapped = obj;
-      }
+    }
     function template(text, newSettings={}) {
 
 
         var noMatch = /(.)^/;
         function escapeChar(match) {
             return '\\' + escapes[match];
-          }
+        }
 
         let settings = Object.assign({}, $.fn.apiator.templateSettings);
         Object.assign(settings, newSettings);
@@ -161,6 +161,8 @@ apiatorDebug = false;
         try {
             render = new Function(argument, '_', source);
         } catch (e) {
+            console.log("Error creating template function",source);
+            console.log(text);
             e.source = source;
             throw e;
         }

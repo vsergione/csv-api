@@ -1,6 +1,6 @@
 {
     "name": "csvapi/csv-api",
-    "description": "A simple PHP API for performing CRUD operations on CSV files",
+    "description": "A simple PHP API for managing CSV files and performing CRUD operations on them",
     "type": "project",
     "require": {
         "php": ">=7.4"
